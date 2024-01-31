@@ -1,0 +1,48 @@
+[package]
+name = "fm_synth"
+version = "0.1.0"
+edition = "2021"
+authors = ["Derek Johnson <derekjohnsonva@gmail.com>"]
+license = "ISC"
+homepage = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+description = "Simple FM synth"
+
+[workspace]
+members = ["xtask"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Remove the `assert_process_allocs` feature to allow allocations on the audio
+# thread in debug builds.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
+    "assert_process_allocs",
+] }
+# Uncomment the below line to disable the on-by-default VST3 feature to remove
+# the GPL compatibility requirement
+# nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default_features = false, features = ["assert_process_allocs"] }
+color-eyre = "0.6.2"
+rstest = "0.18.2"
+
+[dev-dependencies]
+approx = "0.5.0"
+
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+enum_glob_use = "deny"
+pedantic = "deny"
+nursery = "deny"
+unwrap_used = "deny"
