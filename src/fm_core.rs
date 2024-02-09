@@ -11,6 +11,8 @@ pub struct FmCore {
 
     // -- table source
     sin_osc: SinOsc,
+    voice_id: Option<i32>,
+    midi_channel: u8,
     // -- Timebase
     pub clock: Clock,
 }
@@ -22,6 +24,8 @@ impl FmCore {
             output_amplitude: 0.0,
             output_value: 0.0,
             sin_osc: SinOsc::new(),
+            voice_id: None,
+            midi_channel: 0,
             clock: Clock::new(),
         }
     }
@@ -38,7 +42,14 @@ impl FmCore {
         self.output_value
     }
 
-    pub fn note_on(&mut self, note: u8, velocity: f32, sample_rate: f32) {
+    pub fn note_on(
+        &mut self,
+        note: u8,
+        velocity: f32,
+        sample_rate: f32,
+        voice_id: Option<i32>,
+        midi_channel: u8,
+    ) {
         self.sample_rate = sample_rate;
         // convert the midi note to a frequency
         let frequency = util::midi_note_to_freq(note);
@@ -46,12 +57,20 @@ impl FmCore {
         self.clock.set_freq(frequency, sample_rate);
         self.output_amplitude = velocity;
         self.midi_note = note;
+        self.voice_id = voice_id;
+        self.midi_channel = midi_channel;
         self.clock.reset();
     }
 
-    pub fn note_off(&mut self) {
+    pub fn note_off(&mut self, note: u8, voice_id: Option<i32>, midi_channel: u8) {
         // empty for now
-        self.output_amplitude = 0.0;
+        // check if the voice_id matches the current voice_id
+        if self.voice_id == voice_id
+            || (self.midi_channel == midi_channel && self.midi_note == note)
+        {
+            self.output_amplitude = 0.0;
+            self.voice_id = None;
+        }
     }
 }
 
@@ -75,7 +94,7 @@ mod tests {
         let sample_rate = 1760.0; // 4 times the frequency
                                   // Before we can make a sound, we need to send a note_on message to the synth
         let mut fm_core = FmCore::new();
-        fm_core.note_on(midi_note, 1.0, sample_rate);
+        fm_core.note_on(midi_note, 1.0, sample_rate, None, 0);
         // We will set the output amplitude to 1.0, so we can compare the output to the sine wave
         fm_core.output_amplitude = 1.0;
         // Now we can render the sound

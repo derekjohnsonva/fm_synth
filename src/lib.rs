@@ -132,7 +132,6 @@ impl Plugin for FmSynth {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = buffer_config.sample_rate;
-        self.fm_core.note_on(60, 1.0, self.sample_rate);
         true
     }
 
@@ -173,11 +172,23 @@ impl Plugin for FmSynth {
             match next_event {
                 Some(event) if (event.timing() as usize) <= block_start => {
                     match event {
-                        NoteEvent::NoteOn { note, velocity, .. } => {
-                            self.fm_core.note_on(note, velocity, sample_rate);
+                        NoteEvent::NoteOn {
+                            note,
+                            velocity,
+                            voice_id,
+                            channel,
+                            ..
+                        } => {
+                            self.fm_core
+                                .note_on(note, velocity, sample_rate, voice_id, channel);
                         }
-                        NoteEvent::NoteOff { .. } => {
-                            self.fm_core.note_off();
+                        NoteEvent::NoteOff {
+                            note,
+                            voice_id,
+                            channel,
+                            ..
+                        } => {
+                            self.fm_core.note_off(note, voice_id, channel);
                         }
                         _ => {}
                     }
