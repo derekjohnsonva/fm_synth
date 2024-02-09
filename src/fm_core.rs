@@ -70,6 +70,7 @@ mod tests {
     #[rstest]
     fn test_render() {
         let frequency = 440.0;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let midi_note = nih_plug::util::freq_to_midi_note(frequency).round() as u8;
         let sample_rate = 1760.0; // 4 times the frequency
                                   // Before we can make a sound, we need to send a note_on message to the synth

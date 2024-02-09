@@ -1,5 +1,4 @@
 use nih_plug::prelude::*;
-use std::f32::consts; // TODO: Remove
 
 use std::sync::Arc;
 
@@ -9,21 +8,20 @@ mod sin_osc;
 
 use fm_core::FmCore;
 
-// This is a shortened version of the gain example with most comments removed, check out
-// https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
-// started
+/// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed
+/// values to buffers since these values may need to be reused for multiple voices.
+const MAX_BLOCK_SIZE: usize = 64;
 
 struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
     fm_core: FmCore,
     sample_rate: f32,
-    phase: f32, // TODO: remove
 }
 
 #[derive(Params)]
 struct FmSynthParams {
-    /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
+    /// The parameter's ID is used to identify the parameter in the wrapper plugin API. As long as
     /// these IDs remain constant, you can rename and reorder these fields as you wish. The
     /// parameters are exposed to the host in the same order they were defined. In this case, this
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
@@ -39,7 +37,6 @@ impl Default for FmSynth {
             params: Arc::new(FmSynthParams::default()),
             fm_core: FmCore::new(),
             sample_rate: 0.0,
-            phase: 0.0,
         }
     }
 }
@@ -83,20 +80,6 @@ impl Default for FmSynthParams {
     }
 }
 
-impl FmSynth {
-    fn calculate_sine(&mut self, frequency: f32) -> f32 {
-        let phase_delta = frequency / self.sample_rate;
-        let sine = (self.phase * consts::TAU).sin();
-
-        self.phase += phase_delta;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
-
-        sine
-    }
-}
-
 impl Plugin for FmSynth {
     const NAME: &'static str = "Fm Synth";
     const VENDOR: &'static str = "Derek Johnson";
@@ -114,11 +97,11 @@ impl Plugin for FmSynth {
             main_output_channels: NonZeroU32::new(2),
             ..AudioIOLayout::const_default()
         },
-        AudioIOLayout {
-            main_input_channels: NonZeroU32::new(1),
-            main_output_channels: NonZeroU32::new(1),
-            ..AudioIOLayout::const_default()
-        },
+        // AudioIOLayout {
+        //     main_input_channels: NonZeroU32::new(1),
+        //     main_output_channels: NonZeroU32::new(1),
+        //     ..AudioIOLayout::const_default()
+        // },
     ];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
@@ -156,7 +139,7 @@ impl Plugin for FmSynth {
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
-        // self.fm_core.reset()
+        self.fm_core.reset();
     }
     #[allow(clippy::cast_possible_truncation)]
     fn process(
@@ -165,19 +148,79 @@ impl Plugin for FmSynth {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // NIH-plug has a block-splitting adapter for `Buffer`. While this works great for effect
+        // plugins, for polyphonic synths the block size should be `min(MAX_BLOCK_SIZE,
+        // num_remaining_samples, next_event_idx - block_start_idx)`. Because blocks also need to be
+        // split on note events, it's easier to work with raw audio here and to do the splitting by
+        // hand.
+        let num_samples = buffer.samples();
+        let sample_rate = context.transport().sample_rate;
+        let output = buffer.as_slice();
+
         let mut next_event = context.next_event();
-        for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
-            // Smoothing is optionally built into the parameters themselves
-            let gain = self.params.gain.smoothed.next();
-            nih_dbg!(self.sample_rate);
-            nih_dbg!(&self.fm_core.clock);
-            nih_dbg!(self.fm_core.output_amplitude);
-            let sine = nih_dbg!(self.fm_core.render());
-            // let sine = self.calculate_sine(frequency);
-            for sample in channel_samples {
-                *sample = sine * util::db_to_gain_fast(gain);
+        let mut block_start: usize = 0;
+        let mut block_end: usize = MAX_BLOCK_SIZE.min(num_samples);
+
+        while block_start < num_samples {
+            // We have three things that can happen in a block:
+            // 1. The block ends before the next event
+            // 2. The next event happens before the block ends. In this case, we have to split the
+            // block and process the event. We then continue with the next block.
+            // 3. The block ends at the same time as the next event. In this case, we process the
+            // event and continue with the next block.
+            // To handle these cases, we will only process events at the start of a block. If an event
+            // happens in the middle of a block, we will process it at the start of the next block.
+            match next_event {
+                Some(event) if (event.timing() as usize) <= block_start => {
+                    match event {
+                        NoteEvent::NoteOn { note, velocity, .. } => {
+                            self.fm_core.note_on(note, velocity, sample_rate);
+                        }
+                        NoteEvent::NoteOff { .. } => {
+                            self.fm_core.note_off();
+                        }
+                        _ => {}
+                    }
+
+                    next_event = context.next_event();
+                }
+                Some(event) if (event.timing() as usize) < block_end => {
+                    block_end = event.timing() as usize;
+                }
+                _ => (),
             }
+
+            // fill the buffer from the start of the block to the end of the block with zeros
+            // This will make it easier when we turn this into a poly synth
+            for channel in output.iter_mut() {
+                channel[block_start..block_end].fill(0.0);
+            }
+
+            // let block_len = block_end - block_start;
+            for sample_idx in (block_start..block_end).step_by(1) {
+                let gain = self.params.gain.smoothed.next();
+                let sine = self.fm_core.render();
+                for channel in output.iter_mut() {
+                    channel[sample_idx] = sine * gain;
+                }
+            }
+            // And then just keep processing blocks until we've run out of buffer to fill
+            block_start = block_end;
+            block_end = (block_start + MAX_BLOCK_SIZE).min(num_samples);
         }
+
+        // for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
+        //     // Smoothing is optionally built into the parameters themselves
+        //     let gain = self.params.gain.smoothed.next();
+        //     nih_dbg!(self.sample_rate);
+        //     nih_dbg!(&self.fm_core.clock);
+        //     nih_dbg!(self.fm_core.output_amplitude);
+        //     let sine = nih_dbg!(self.fm_core.render());
+        //     // let sine = self.calculate_sine(frequency);
+        //     for sample in channel_samples {
+        //         *sample = sine * util::db_to_gain_fast(gain);
+        //     }
+        // }
 
         ProcessStatus::KeepAlive
     }
@@ -194,7 +237,7 @@ impl ClapPlugin for FmSynth {
         ClapFeature::Instrument,
         ClapFeature::Synthesizer,
         ClapFeature::Stereo,
-        ClapFeature::Mono,
+        // ClapFeature::Mono,
     ];
 }
 
