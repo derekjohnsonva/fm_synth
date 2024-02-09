@@ -209,19 +209,6 @@ impl Plugin for FmSynth {
             block_end = (block_start + MAX_BLOCK_SIZE).min(num_samples);
         }
 
-        // for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
-        //     // Smoothing is optionally built into the parameters themselves
-        //     let gain = self.params.gain.smoothed.next();
-        //     nih_dbg!(self.sample_rate);
-        //     nih_dbg!(&self.fm_core.clock);
-        //     nih_dbg!(self.fm_core.output_amplitude);
-        //     let sine = nih_dbg!(self.fm_core.render());
-        //     // let sine = self.calculate_sine(frequency);
-        //     for sample in channel_samples {
-        //         *sample = sine * util::db_to_gain_fast(gain);
-        //     }
-        // }
-
         ProcessStatus::KeepAlive
     }
 }
