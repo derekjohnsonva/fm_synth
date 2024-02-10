@@ -12,7 +12,7 @@ use fm_core::FmCore;
 /// values to buffers since these values may need to be reused for multiple voices.
 const MAX_BLOCK_SIZE: usize = 64;
 
-struct FmSynth {
+pub struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
     fm_core: FmCore,
