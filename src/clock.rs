@@ -28,7 +28,6 @@ pub struct Clock {
     pub phase_offset: f32, // PM
     pub freq_offset: f32,  // FM
     pub frequency_hz: f32, // clock frequency
-    pub sample_rate: f32,
 }
 
 // Methods for SynthClock
@@ -48,7 +47,6 @@ impl Clock {
             phase_offset: 0.0,
             freq_offset: 0.0,
             frequency_hz: 0.0,
-            sample_rate: 440.0,
         }
     }
     /// Resets the clock to its initial state.
@@ -97,7 +95,6 @@ impl Clock {
     /// - `sample_rate`: The sample rate in Hz.
     pub fn set_freq(&mut self, frequency_hz: f32, sample_rate: f32) {
         self.frequency_hz = frequency_hz;
-        self.sample_rate = sample_rate;
         self.phase_inc = frequency_hz / sample_rate;
     }
 
@@ -192,7 +189,6 @@ mod tests {
         let mut clock = Clock::new();
         clock.set_freq(440.0, 44100.0);
         assert_relative_eq!(clock.frequency_hz, 440.0);
-        assert_relative_eq!(clock.sample_rate, 44100.0);
         assert_relative_eq!(clock.phase_inc, 440.0 / 44100.0);
     }
 

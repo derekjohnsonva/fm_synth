@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 mod clock;
 mod fm_core;
+mod linear_eg;
 mod sin_osc;
 
 use fm_core::FmCore;
@@ -131,7 +132,6 @@ impl Plugin for FmSynth {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
-        self.sample_rate = buffer_config.sample_rate;
         true
     }
 

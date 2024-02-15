@@ -2,6 +2,8 @@ use crate::clock::Clock;
 use crate::sin_osc::SinOsc;
 use nih_plug::util;
 
+// An FM core has a single oscillator and an envelope
+
 #[derive(Debug)]
 pub struct FmCore {
     sample_rate: f32,
@@ -16,6 +18,7 @@ pub struct FmCore {
     // -- Timebase
     pub clock: Clock,
 }
+
 impl FmCore {
     pub fn new() -> Self {
         Self {
