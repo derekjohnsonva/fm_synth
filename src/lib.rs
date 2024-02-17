@@ -7,8 +7,9 @@ mod fm_core;
 mod linear_eg;
 mod sin_osc;
 
+use crate::linear_eg::EnvelopeGenerator;
 use fm_core::FmCore;
-
+use linear_eg::LinearEG;
 /// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed
 /// values to buffers since these values may need to be reused for multiple voices.
 const MAX_BLOCK_SIZE: usize = 64;
@@ -17,6 +18,8 @@ pub struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
     fm_core: FmCore,
+    eg: linear_eg::LinearEG,
+    eg_params: linear_eg::EGParameters,
     sample_rate: f32,
 }
 
@@ -30,6 +33,15 @@ struct FmSynthParams {
     pub gain: FloatParam,
     #[id = "modulation_index"]
     pub modulation_index: FloatParam,
+    #[id = "attack_time"]
+    pub attack_time: FloatParam,
+    // TODO: Make it so that if decay time is less that a certain value, sustain level is not used.
+    #[id = "decay_time"]
+    pub decay_time: FloatParam,
+    #[id = "sustain_level"]
+    pub sustain_level: FloatParam,
+    #[id = "release_time"]
+    pub release_time: FloatParam,
 }
 
 impl Default for FmSynth {
@@ -37,6 +49,8 @@ impl Default for FmSynth {
         Self {
             params: Arc::new(FmSynthParams::default()),
             fm_core: FmCore::new(),
+            eg: LinearEG::new(0.0),
+            eg_params: linear_eg::EGParameters::default(),
             sample_rate: 0.0,
         }
     }
@@ -75,6 +89,40 @@ impl Default for FmSynthParams {
                 FloatRange::Linear {
                     min: 0.0,
                     max: 10.0,
+                },
+            ),
+            attack_time: FloatParam::new(
+                "Attack Time",
+                10.0,
+                FloatRange::Linear {
+                    min: 1.0,
+                    max: 1000.0,
+                },
+            )
+            .with_smoother(SmoothingStyle::Logarithmic(50.0))
+            .with_unit(" ms"),
+            decay_time: FloatParam::new(
+                "Decay Time",
+                100.0,
+                FloatRange::Linear {
+                    min: 1.0,
+                    max: 1000.0,
+                },
+            )
+            .with_smoother(SmoothingStyle::Logarithmic(50.0))
+            .with_unit(" ms"),
+            sustain_level: FloatParam::new(
+                "Sustain Level",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(50.0)),
+            release_time: FloatParam::new(
+                "Release Time",
+                100.0,
+                FloatRange::Linear {
+                    min: 1.0,
+                    max: 1000.0,
                 },
             ),
         }
@@ -132,6 +180,8 @@ impl Plugin for FmSynth {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
+        self.sample_rate = buffer_config.sample_rate;
+        self.eg = LinearEG::new(self.sample_rate);
         true
     }
 
@@ -139,6 +189,7 @@ impl Plugin for FmSynth {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
         self.fm_core.reset();
+        self.eg.reset(&self.eg_params, self.sample_rate);
     }
     #[allow(clippy::cast_possible_truncation)]
     fn process(
@@ -181,6 +232,7 @@ impl Plugin for FmSynth {
                         } => {
                             self.fm_core
                                 .note_on(note, velocity, sample_rate, voice_id, channel);
+                            self.eg.note_on(&self.eg_params);
                         }
                         NoteEvent::NoteOff {
                             note,
@@ -189,6 +241,7 @@ impl Plugin for FmSynth {
                             ..
                         } => {
                             self.fm_core.note_off(note, voice_id, channel);
+                            self.eg.note_off(&self.eg_params);
                         }
                         _ => {}
                     }
@@ -207,12 +260,47 @@ impl Plugin for FmSynth {
                 channel[block_start..block_end].fill(0.0);
             }
 
+            // Get the Envelope generator value
+            let num_samples_to_process = block_end.checked_sub(block_start);
+            let num_samples_to_process = match num_samples_to_process {
+                Some(num_samples_to_process) => num_samples_to_process,
+                None => {
+                    nih_error!("Error with block size");
+                    break;
+                }
+            };
+
+            self.eg_params = linear_eg::EGParameters {
+                attack_time_msec: self
+                    .params
+                    .attack_time
+                    .smoothed
+                    .next_step(num_samples_to_process as u32),
+                decay_time_msec: self
+                    .params
+                    .decay_time
+                    .smoothed
+                    .next_step(num_samples_to_process as u32),
+                release_time_msec: self
+                    .params
+                    .release_time
+                    .smoothed
+                    .next_step(num_samples_to_process as u32),
+                start_level: 0.0,
+                sustain_level: self
+                    .params
+                    .sustain_level
+                    .smoothed
+                    .next_step(num_samples_to_process as u32),
+            };
+            let eg_value = self.eg.render(&self.eg_params, num_samples_to_process);
+
             // let block_len = block_end - block_start;
             for sample_idx in (block_start..block_end).step_by(1) {
                 let gain = self.params.gain.smoothed.next();
                 let sine = self.fm_core.render();
                 for channel in output.iter_mut() {
-                    channel[sample_idx] = sine * gain;
+                    channel[sample_idx] = sine * gain * eg_value;
                 }
             }
             // And then just keep processing blocks until we've run out of buffer to fill

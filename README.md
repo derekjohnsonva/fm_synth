@@ -17,3 +17,6 @@ fn main() {
     nih_export_standalone::<FmSynth>();
 }
 ```
+
+## Issues
+* We are getting pops on overlapping note changes. This is due to the adsr resetting to the 0. We need to fix this by implementing note stealing.

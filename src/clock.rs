@@ -103,6 +103,7 @@ impl Clock {
     /// Parameters:
     /// - `phase_offset`: The phase offset to add.
     /// - `wrap`: Whether to wrap the clock around after adding the phase offset.
+    #[allow(dead_code)]
     pub fn add_phase_offset(&mut self, phase_offset: f32, wrap: bool) {
         self.phase_offset = phase_offset;
         if self.phase_inc > 0.0 {

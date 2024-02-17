@@ -8,9 +8,9 @@ use nih_plug::util;
 pub struct FmCore {
     sample_rate: f32,
     midi_note: u8,
-    pub output_amplitude: f32, // amplitude in dB
-    output_value: f32,         // The last output value. This is used for self Feedback
-
+    pub note_velocity: f32, // amplitude in dB
+    output_value: f32,      // The last output value. This is used for self Feedback
+    velocity_scale: f32,    // How much the note velocity affects the output amplitude
     // -- table source
     sin_osc: SinOsc,
     voice_id: Option<i32>,
@@ -24,7 +24,8 @@ impl FmCore {
         Self {
             sample_rate: 0.0,
             midi_note: 0,
-            output_amplitude: 0.0,
+            note_velocity: 0.0,
+            velocity_scale: 1.0,
             output_value: 0.0,
             sin_osc: SinOsc::new(),
             voice_id: None,
@@ -33,14 +34,14 @@ impl FmCore {
         }
     }
     pub fn reset(&mut self) {
-        self.output_amplitude = 0.0;
+        self.note_velocity = 0.0;
         self.output_value = 0.0;
         self.clock.reset();
     }
 
     pub fn render(&mut self) -> f32 {
         self.output_value = self.sin_osc.read_osc(self.clock.mcounter);
-        self.output_value *= self.output_amplitude;
+        self.output_value *= self.note_velocity * self.velocity_scale;
         self.clock.advance_wrap_clock(1.0);
         self.output_value
     }
@@ -58,7 +59,7 @@ impl FmCore {
         let frequency = util::midi_note_to_freq(note);
         // set the frequency of the oscillator
         self.clock.set_freq(frequency, sample_rate);
-        self.output_amplitude = velocity;
+        self.note_velocity = velocity;
         self.midi_note = note;
         self.voice_id = voice_id;
         self.midi_channel = midi_channel;
@@ -71,7 +72,6 @@ impl FmCore {
         if self.voice_id == voice_id
             || (self.midi_channel == midi_channel && self.midi_note == note)
         {
-            self.output_amplitude = 0.0;
             self.voice_id = None;
         }
     }
@@ -99,7 +99,7 @@ mod tests {
         let mut fm_core = FmCore::new();
         fm_core.note_on(midi_note, 1.0, sample_rate, None, 0);
         // We will set the output amplitude to 1.0, so we can compare the output to the sine wave
-        fm_core.output_amplitude = 1.0;
+        fm_core.note_velocity = 1.0;
         // Now we can render the sound
         let output = fm_core.render();
         assert_relative_eq!(output, 0.0);
