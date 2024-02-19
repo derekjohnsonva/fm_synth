@@ -33,8 +33,11 @@ const SHUTDOWN_ITME_MSEC: f32 = 2.0;
 /// The `EnvelopeGenerator` trait defines the methods that an envelope generator should implement.
 pub trait EnvelopeGenerator {
     /// Creates a new instance of the envelope generator.
-    fn new(sample_rate: f32) -> Self;
+    fn new() -> Self;
 
+    fn initialize(&mut self, parameters: &EGParameters, sample_rate: f32) {
+        self.reset(parameters, sample_rate);
+    }
     /// Resets the envelope generator with the given parameters and sample rate.
     fn reset(&mut self, parameters: &EGParameters, sample_rate: f32);
 
@@ -77,11 +80,11 @@ pub struct LinearEG {
 
 impl EnvelopeGenerator for LinearEG {
     /// Creates a new instance of the linear envelope generator.
-    fn new(sample_rate: f32) -> Self {
+    fn new() -> Self {
         Self {
             state: EnvelopeState::Off,
             step_increase: 0.0,
-            sample_rate,
+            sample_rate: 0.0,
             output_value: 0.0,
             shutdown_increment: 0.0,
         }
@@ -218,7 +221,7 @@ mod tests {
     #[rstest]
     fn test_render_attack() {
         let sample_rate = 44100.0;
-        let mut eg = LinearEG::new(sample_rate);
+        let mut eg = LinearEG::new();
         let parameters = EGParameters {
             start_level: 0.0,
             attack_time_msec: 100.0,
@@ -247,7 +250,11 @@ mod tests {
     #[rstest]
     fn test_calc_step_increase() {
         let sample_rate = 1000.0;
-        let mut eg = LinearEG::new(sample_rate);
+        let mut eg = LinearEG::new();
+        let parameters = EGParameters {
+            ..Default::default()
+        };
+        eg.initialize(&parameters, sample_rate);
         let time_ms = 100.0;
         let scale = 1.0;
         let step_increase = eg.calc_step_increase(time_ms, scale);
@@ -257,7 +264,7 @@ mod tests {
     #[rstest]
     fn test_note_off() {
         let sample_rate = 44100.0;
-        let mut eg = LinearEG::new(sample_rate);
+        let mut eg = LinearEG::new();
         // Check that if the eg is in attack mode, it switches to release mode
         let parameters = EGParameters {
             ..Default::default()
@@ -285,7 +292,7 @@ mod tests {
     #[rstest]
     fn test_note_on() {
         let sample_rate = 1000.0;
-        let mut eg = LinearEG::new(sample_rate);
+        let mut eg = LinearEG::new();
         let parameters = EGParameters {
             ..Default::default()
         };

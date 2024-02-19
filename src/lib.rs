@@ -6,10 +6,8 @@ mod clock;
 mod fm_core;
 mod linear_eg;
 mod sin_osc;
+mod voice;
 
-use crate::linear_eg::EnvelopeGenerator;
-use fm_core::FmCore;
-use linear_eg::LinearEG;
 /// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed
 /// values to buffers since these values may need to be reused for multiple voices.
 const MAX_BLOCK_SIZE: usize = 64;
@@ -17,10 +15,9 @@ const MAX_BLOCK_SIZE: usize = 64;
 pub struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
-    fm_core: FmCore,
-    eg: linear_eg::LinearEG,
-    eg_params: linear_eg::EGParameters,
+    voice: voice::Voice,
     sample_rate: f32,
+    voice_params: voice::VoiceParameters,
 }
 
 #[derive(Params)]
@@ -48,11 +45,41 @@ impl Default for FmSynth {
     fn default() -> Self {
         Self {
             params: Arc::new(FmSynthParams::default()),
-            fm_core: FmCore::new(),
-            eg: LinearEG::new(0.0),
-            eg_params: linear_eg::EGParameters::default(),
+            voice: voice::Voice::new(),
             sample_rate: 0.0,
+            voice_params: voice::VoiceParameters::default(),
         }
+    }
+}
+
+impl FmSynth {
+    // make a function that will update the VoiceParameters from the gui
+    fn update_voice_params(&mut self, num_samples_to_process: usize, sample_rate: f32) {
+        let eg_params = linear_eg::EGParameters {
+            attack_time_msec: self
+                .params
+                .attack_time
+                .smoothed
+                .next_step(num_samples_to_process as u32),
+            decay_time_msec: self
+                .params
+                .decay_time
+                .smoothed
+                .next_step(num_samples_to_process as u32),
+            release_time_msec: self
+                .params
+                .release_time
+                .smoothed
+                .next_step(num_samples_to_process as u32),
+            start_level: 0.0,
+            sustain_level: self
+                .params
+                .sustain_level
+                .smoothed
+                .next_step(num_samples_to_process as u32),
+        };
+        self.voice_params.eg_params = eg_params;
+        self.voice_params.sample_rate = sample_rate;
     }
 }
 
@@ -181,15 +208,14 @@ impl Plugin for FmSynth {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = buffer_config.sample_rate;
-        self.eg = LinearEG::new(self.sample_rate);
+        self.voice.reset(&self.voice_params);
         true
     }
 
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
-        self.fm_core.reset();
-        self.eg.reset(&self.eg_params, self.sample_rate);
+        self.voice.reset(&self.voice_params);
     }
     #[allow(clippy::cast_possible_truncation)]
     fn process(
@@ -230,9 +256,13 @@ impl Plugin for FmSynth {
                             channel,
                             ..
                         } => {
-                            self.fm_core
-                                .note_on(note, velocity, sample_rate, voice_id, channel);
-                            self.eg.note_on(&self.eg_params);
+                            self.voice.note_on(
+                                note,
+                                velocity,
+                                voice_id,
+                                channel,
+                                &self.voice_params,
+                            );
                         }
                         NoteEvent::NoteOff {
                             note,
@@ -240,8 +270,8 @@ impl Plugin for FmSynth {
                             channel,
                             ..
                         } => {
-                            self.fm_core.note_off(note, voice_id, channel);
-                            self.eg.note_off(&self.eg_params);
+                            self.voice
+                                .note_off(voice_id, channel, note, &self.voice_params);
                         }
                         _ => {}
                     }
@@ -270,39 +300,27 @@ impl Plugin for FmSynth {
                 }
             };
 
-            self.eg_params = linear_eg::EGParameters {
-                attack_time_msec: self
-                    .params
-                    .attack_time
-                    .smoothed
-                    .next_step(num_samples_to_process as u32),
-                decay_time_msec: self
-                    .params
-                    .decay_time
-                    .smoothed
-                    .next_step(num_samples_to_process as u32),
-                release_time_msec: self
-                    .params
-                    .release_time
-                    .smoothed
-                    .next_step(num_samples_to_process as u32),
-                start_level: 0.0,
-                sustain_level: self
-                    .params
-                    .sustain_level
-                    .smoothed
-                    .next_step(num_samples_to_process as u32),
-            };
-            let eg_value = self.eg.render(&self.eg_params, num_samples_to_process);
-
-            // let block_len = block_end - block_start;
-            for sample_idx in (block_start..block_end).step_by(1) {
-                let gain = self.params.gain.smoothed.next();
-                let sine = self.fm_core.render();
-                for channel in output.iter_mut() {
-                    channel[sample_idx] = sine * gain * eg_value;
+            self.update_voice_params(num_samples_to_process, sample_rate);
+            let rendered_values =
+                self.voice
+                    .render(&self.voice_params, num_samples_to_process, output.len());
+            nih_dbg!("Pased Rendered values");
+            for (channel, rendered_values) in output.iter_mut().zip(rendered_values) {
+                for (sample_idx, rendered_value) in rendered_values.iter().enumerate() {
+                    channel[block_start + sample_idx] = *rendered_value;
                 }
             }
+
+            // let eg_value = self.eg.render(&self.eg_params, num_samples_to_process);
+
+            // // let block_len = block_end - block_start;
+            // for sample_idx in (block_start..block_end).step_by(1) {
+            //     let gain = self.params.gain.smoothed.next();
+            //     let sine = self.fm_core.render();
+            //     for channel in output.iter_mut() {
+            //         channel[sample_idx] = sine * gain * eg_value;
+            //     }
+            // }
             // And then just keep processing blocks until we've run out of buffer to fill
             block_start = block_end;
             block_end = (block_start + MAX_BLOCK_SIZE).min(num_samples);
