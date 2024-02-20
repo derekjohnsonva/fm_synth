@@ -6,7 +6,6 @@ use nih_plug::util;
 
 #[derive(Debug)]
 pub struct FmCore {
-    sample_rate: f32,
     midi_note: u8,
     pub note_velocity: f32, // amplitude in dB
     output_value: f32,      // The last output value. This is used for self Feedback
@@ -22,7 +21,6 @@ pub struct FmCore {
 impl FmCore {
     pub fn new() -> Self {
         Self {
-            sample_rate: 0.0,
             midi_note: 0,
             note_velocity: 0.0,
             velocity_scale: 1.0,
@@ -54,7 +52,6 @@ impl FmCore {
         voice_id: Option<i32>,
         midi_channel: u8,
     ) {
-        self.sample_rate = sample_rate;
         // convert the midi note to a frequency
         let frequency = util::midi_note_to_freq(note);
         // set the frequency of the oscillator
