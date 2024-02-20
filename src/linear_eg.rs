@@ -13,6 +13,7 @@ pub struct EGParameters {
     // end_level: f32,          // from GUI control
     // decay_level: f32,        // from GUI control
     pub sustain_level: f32, // from GUI control
+    pub sample_rate: f32,
 }
 impl Default for EGParameters {
     fn default() -> Self {
@@ -22,6 +23,7 @@ impl Default for EGParameters {
             release_time_msec: 100.0,
             start_level: 0.0,
             sustain_level: 0.4,
+            sample_rate: 0.0,
         }
     }
 }
@@ -33,10 +35,10 @@ const SHUTDOWN_ITME_MSEC: f32 = 2.0;
 /// The `EnvelopeGenerator` trait defines the methods that an envelope generator should implement.
 pub trait EnvelopeGenerator {
     /// Creates a new instance of the envelope generator.
-    fn new(sample_rate: f32) -> Self;
+    fn new() -> Self;
 
     /// Resets the envelope generator with the given parameters and sample rate.
-    fn reset(&mut self, parameters: &EGParameters, sample_rate: f32);
+    fn reset(&mut self, parameters: &EGParameters);
 
     /// Updates the envelope generator with the given parameters.
     fn update(&mut self, parameters: &EGParameters);
@@ -70,26 +72,43 @@ enum EnvelopeState {
 pub struct LinearEG {
     state: EnvelopeState,
     step_increase: f32,
-    sample_rate: f32,
     output_value: f32,
     shutdown_increment: f32,
 }
 
+/// Calculate the linear step increase. This is for all the linear segments of the envelope.
+/// We are finding the step increase for every sample
+///
+/// Parameters:
+/// - `time_ms` = time in milliseconds
+/// - `scale` = the scale factor for the step increase
+fn calc_step_increase(time_ms: f32, scale: f32, sample_rate: f32) -> f32 {
+    // do a zero check
+    if time_ms == 0.0 {
+        return 0.0;
+    }
+    // calculate the step increase
+    // `sample_rate` = samples / second
+    //
+    // 1000.0 / `time_ms` = time in seconds
+    //
+    // time in seconds * (1 /`sample_rate`) = samples
+    scale * (1000.0 / (time_ms * sample_rate))
+}
+
 impl EnvelopeGenerator for LinearEG {
     /// Creates a new instance of the linear envelope generator.
-    fn new(sample_rate: f32) -> Self {
+    fn new() -> Self {
         Self {
             state: EnvelopeState::Off,
             step_increase: 0.0,
-            sample_rate,
             output_value: 0.0,
             shutdown_increment: 0.0,
         }
     }
 
     /// Resets the linear envelope generator with the given parameters and sample rate.
-    fn reset(&mut self, parameters: &EGParameters, sample_rate: f32) {
-        self.sample_rate = sample_rate;
+    fn reset(&mut self, parameters: &EGParameters) {
         self.output_value = parameters.start_level;
         self.state = EnvelopeState::Off;
     }
@@ -104,6 +123,7 @@ impl EnvelopeGenerator for LinearEG {
     fn render(&mut self, parameters: &EGParameters, num_samples_to_process: usize) -> f32 {
         // TODO: Implement the render method
         let mut output = 0.0;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         for i in 0..(num_samples_to_process as i32) {
             match self.state {
                 EnvelopeState::Off => {
@@ -116,8 +136,11 @@ impl EnvelopeGenerator for LinearEG {
                         self.output_value = MAX_EG_LEVEL;
                         // calculate the decay step
                         let scale = -1.0;
-                        self.step_increase =
-                            self.calc_step_increase(parameters.decay_time_msec, scale);
+                        self.step_increase = calc_step_increase(
+                            parameters.decay_time_msec,
+                            scale,
+                            parameters.sample_rate,
+                        );
                         self.state = EnvelopeState::Decay;
                     }
                 }
@@ -156,7 +179,8 @@ impl EnvelopeGenerator for LinearEG {
     /// Notifies the linear envelope generator that a note has been turned off.
     fn note_off(&mut self, parameters: &EGParameters) {
         let scale = -1.0;
-        self.step_increase = self.calc_step_increase(parameters.release_time_msec, scale);
+        self.step_increase =
+            calc_step_increase(parameters.release_time_msec, scale, parameters.sample_rate);
         nih_debug_assert!(self.step_increase < 0.0);
         if self.output_value > MIN_EG_LEVEL {
             self.state = EnvelopeState::Release;
@@ -167,39 +191,18 @@ impl EnvelopeGenerator for LinearEG {
 
     /// Notifies the linear envelope generator that a note has been turned on.
     fn note_on(&mut self, parameters: &EGParameters) {
-        self.step_increase = self.calc_step_increase(parameters.attack_time_msec, 1.0);
+        self.step_increase =
+            calc_step_increase(parameters.attack_time_msec, 1.0, parameters.sample_rate);
         nih_debug_assert!(self.step_increase > 0.0);
         self.state = EnvelopeState::Attack;
         self.output_value = parameters.start_level - self.step_increase; // Not sure why we need to do the subtraction
     }
 
-    fn shutdown(&mut self, _parameters: &EGParameters) {
+    fn shutdown(&mut self, parameters: &EGParameters) {
         self.shutdown_increment =
-            -(1000.0 * self.output_value) / SHUTDOWN_ITME_MSEC / self.sample_rate;
+            -(1000.0 * self.output_value) / SHUTDOWN_ITME_MSEC / parameters.sample_rate;
         nih_debug_assert!(self.shutdown_increment < 0.0);
         self.state = EnvelopeState::Shutdown;
-    }
-}
-
-impl LinearEG {
-    /// Calculate the linear step increase. This is for all the linear segments of the envelope.
-    /// We are finding the step increase for every sample
-    ///
-    /// Parameters:
-    /// - `time_ms` = time in milliseconds
-    /// - `scale` = the scale factor for the step increase
-    fn calc_step_increase(&mut self, time_ms: f32, scale: f32) -> f32 {
-        // do a zero check
-        if time_ms == 0.0 {
-            return 0.0;
-        }
-        // calculate the step increase
-        // `sample_rate` = samples / second
-        //
-        // 1000.0 / `time_ms` = time in seconds
-        //
-        // time in seconds * (1 /`sample_rate`) = samples
-        scale * (1000.0 / (time_ms * self.sample_rate))
     }
 }
 
@@ -217,8 +220,7 @@ mod tests {
 
     #[rstest]
     fn test_render_attack() {
-        let sample_rate = 44100.0;
-        let mut eg = LinearEG::new(sample_rate);
+        let mut eg = LinearEG::new();
         let parameters = EGParameters {
             start_level: 0.0,
             attack_time_msec: 100.0,
@@ -229,7 +231,7 @@ mod tests {
         };
         let num_samples_to_process = 50;
 
-        eg.reset(&parameters, sample_rate);
+        eg.reset(&parameters);
         eg.state = EnvelopeState::Attack;
         eg.step_increase = 0.01;
         // We should be able to render twice
@@ -247,21 +249,17 @@ mod tests {
     #[rstest]
     fn test_calc_step_increase() {
         let sample_rate = 1000.0;
-        let mut eg = LinearEG::new(sample_rate);
         let time_ms = 100.0;
         let scale = 1.0;
-        let step_increase = eg.calc_step_increase(time_ms, scale);
+        let step_increase = calc_step_increase(time_ms, scale, sample_rate);
         assert_relative_eq!(step_increase, 0.01);
     }
 
     #[rstest]
     fn test_note_off() {
-        let sample_rate = 44100.0;
-        let mut eg = LinearEG::new(sample_rate);
+        let mut eg = LinearEG::new();
         // Check that if the eg is in attack mode, it switches to release mode
-        let parameters = EGParameters {
-            ..Default::default()
-        };
+        let parameters = EGParameters::default();
         for state in [
             EnvelopeState::Attack,
             EnvelopeState::Decay,
@@ -279,16 +277,13 @@ mod tests {
         eg.output_value = 0.0;
         eg.note_off(&parameters);
         assert_eq!(eg.state, EnvelopeState::Off);
-        assert_eq!(eg.output_value, 0.0);
+        assert_relative_eq!(eg.output_value, 0.0);
     }
 
     #[rstest]
     fn test_note_on() {
-        let sample_rate = 1000.0;
-        let mut eg = LinearEG::new(sample_rate);
-        let parameters = EGParameters {
-            ..Default::default()
-        };
+        let mut eg = LinearEG::new();
+        let parameters = EGParameters::default();
         // check that any other state will be set to attack
         // and the output value will be set to 0
         for state in [

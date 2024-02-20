@@ -49,7 +49,7 @@ impl Default for FmSynth {
         Self {
             params: Arc::new(FmSynthParams::default()),
             fm_core: FmCore::new(),
-            eg: LinearEG::new(0.0),
+            eg: LinearEG::new(),
             eg_params: linear_eg::EGParameters::default(),
             sample_rate: 0.0,
         }
@@ -181,7 +181,7 @@ impl Plugin for FmSynth {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = buffer_config.sample_rate;
-        self.eg = LinearEG::new(self.sample_rate);
+        self.eg = LinearEG::new();
         true
     }
 
@@ -189,7 +189,7 @@ impl Plugin for FmSynth {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
         self.fm_core.reset();
-        self.eg.reset(&self.eg_params, self.sample_rate);
+        self.eg.reset(&self.eg_params);
     }
     #[allow(clippy::cast_possible_truncation)]
     fn process(
@@ -262,38 +262,35 @@ impl Plugin for FmSynth {
 
             // Get the Envelope generator value
             let num_samples_to_process = block_end.checked_sub(block_start);
-            let num_samples_to_process = match num_samples_to_process {
-                Some(num_samples_to_process) => num_samples_to_process,
-                None => {
-                    nih_error!("Error with block size");
-                    break;
-                }
-            };
-
+            let num_samples_to_process_u32 = num_samples_to_process.unwrap_or(0) as u32;
             self.eg_params = linear_eg::EGParameters {
                 attack_time_msec: self
                     .params
                     .attack_time
                     .smoothed
-                    .next_step(num_samples_to_process as u32),
+                    .next_step(num_samples_to_process_u32),
                 decay_time_msec: self
                     .params
                     .decay_time
                     .smoothed
-                    .next_step(num_samples_to_process as u32),
+                    .next_step(num_samples_to_process_u32),
                 release_time_msec: self
                     .params
                     .release_time
                     .smoothed
-                    .next_step(num_samples_to_process as u32),
+                    .next_step(num_samples_to_process_u32),
                 start_level: 0.0,
                 sustain_level: self
                     .params
                     .sustain_level
                     .smoothed
-                    .next_step(num_samples_to_process as u32),
+                    .next_step(num_samples_to_process_u32),
+                sample_rate,
             };
-            let eg_value = self.eg.render(&self.eg_params, num_samples_to_process);
+            let eg_value = self.eg.render(
+                &self.eg_params,
+                num_samples_to_process.expect("could not get num_samples_to_process in processing"),
+            );
 
             // let block_len = block_end - block_start;
             for sample_idx in (block_start..block_end).step_by(1) {
