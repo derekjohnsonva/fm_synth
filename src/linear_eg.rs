@@ -13,7 +13,6 @@ pub struct EGParameters {
     // end_level: f32,          // from GUI control
     // decay_level: f32,        // from GUI control
     pub sustain_level: f32, // from GUI control
-    pub sample_rate: f32,
 }
 impl Default for EGParameters {
     fn default() -> Self {
@@ -23,7 +22,6 @@ impl Default for EGParameters {
             release_time_msec: 100.0,
             start_level: 0.0,
             sustain_level: 0.4,
-            sample_rate: 0.0,
         }
     }
 }
@@ -44,16 +42,21 @@ pub trait EnvelopeGenerator {
     fn update(&mut self, parameters: &EGParameters);
 
     /// Renders the envelope generator output for the specified number of samples.
-    fn render(&mut self, parameters: &EGParameters, num_samples_to_process: usize) -> f32;
+    fn render(
+        &mut self,
+        parameters: &EGParameters,
+        num_samples_to_process: usize,
+        sample_rate: f32,
+    ) -> f32;
 
     /// Notifies the envelope generator that a note has been turned off.
-    fn note_off(&mut self, parameters: &EGParameters);
+    fn note_off(&mut self, parameters: &EGParameters, sample_rate: f32);
 
     /// Notifies the envelope generator that a note has been turned on.
-    fn note_on(&mut self, parameters: &EGParameters);
+    fn note_on(&mut self, parameters: &EGParameters, sample_rate: f32);
 
     /// Shuts down the envelope generator. Used for voice stealing.
-    fn shutdown(&mut self, parameters: &EGParameters);
+    fn shutdown(&mut self, parameters: &EGParameters, sample_rate: f32);
 }
 
 /// Represents the state of the envelope generator.
@@ -120,7 +123,12 @@ impl EnvelopeGenerator for LinearEG {
 
     /// Renders the output of the linear envelope generator for the specified number of samples.
     /// We only return the output value for the first sample.
-    fn render(&mut self, parameters: &EGParameters, num_samples_to_process: usize) -> f32 {
+    fn render(
+        &mut self,
+        parameters: &EGParameters,
+        num_samples_to_process: usize,
+        sample_rate: f32,
+    ) -> f32 {
         // TODO: Implement the render method
         let mut output = 0.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
@@ -136,11 +144,8 @@ impl EnvelopeGenerator for LinearEG {
                         self.output_value = MAX_EG_LEVEL;
                         // calculate the decay step
                         let scale = -1.0;
-                        self.step_increase = calc_step_increase(
-                            parameters.decay_time_msec,
-                            scale,
-                            parameters.sample_rate,
-                        );
+                        self.step_increase =
+                            calc_step_increase(parameters.decay_time_msec, scale, sample_rate);
                         self.state = EnvelopeState::Decay;
                     }
                 }
@@ -177,10 +182,9 @@ impl EnvelopeGenerator for LinearEG {
     }
 
     /// Notifies the linear envelope generator that a note has been turned off.
-    fn note_off(&mut self, parameters: &EGParameters) {
+    fn note_off(&mut self, parameters: &EGParameters, sample_rate: f32) {
         let scale = -1.0;
-        self.step_increase =
-            calc_step_increase(parameters.release_time_msec, scale, parameters.sample_rate);
+        self.step_increase = calc_step_increase(parameters.release_time_msec, scale, sample_rate);
         nih_debug_assert!(self.step_increase < 0.0);
         if self.output_value > MIN_EG_LEVEL {
             self.state = EnvelopeState::Release;
@@ -190,17 +194,15 @@ impl EnvelopeGenerator for LinearEG {
     }
 
     /// Notifies the linear envelope generator that a note has been turned on.
-    fn note_on(&mut self, parameters: &EGParameters) {
-        self.step_increase =
-            calc_step_increase(parameters.attack_time_msec, 1.0, parameters.sample_rate);
+    fn note_on(&mut self, parameters: &EGParameters, sample_rate: f32) {
+        self.step_increase = calc_step_increase(parameters.attack_time_msec, 1.0, sample_rate);
         nih_debug_assert!(self.step_increase > 0.0);
         self.state = EnvelopeState::Attack;
         self.output_value = parameters.start_level - self.step_increase; // Not sure why we need to do the subtraction
     }
 
-    fn shutdown(&mut self, parameters: &EGParameters) {
-        self.shutdown_increment =
-            -(1000.0 * self.output_value) / SHUTDOWN_ITME_MSEC / parameters.sample_rate;
+    fn shutdown(&mut self, _parameters: &EGParameters, sample_rate: f32) {
+        self.shutdown_increment = -(1000.0 * self.output_value) / SHUTDOWN_ITME_MSEC / sample_rate;
         nih_debug_assert!(self.shutdown_increment < 0.0);
         self.state = EnvelopeState::Shutdown;
     }
@@ -227,7 +229,6 @@ mod tests {
             decay_time_msec: 100.0,
             sustain_level: 0.5,
             release_time_msec: 200.0,
-            ..Default::default()
         };
         let num_samples_to_process = 50;
 
@@ -235,7 +236,7 @@ mod tests {
         eg.state = EnvelopeState::Attack;
         eg.step_increase = 0.01;
         // We should be able to render twice
-        let output = eg.render(&parameters, num_samples_to_process);
+        let output = eg.render(&parameters, num_samples_to_process, 1000.0);
 
         // Assert that the output value increases during the attack phase
         assert!(output.eq(&0.01));
@@ -268,14 +269,14 @@ mod tests {
         ] {
             eg.state = state;
             eg.output_value = 0.5;
-            eg.note_off(&parameters);
+            eg.note_off(&parameters, 1000.0);
             assert_eq!(eg.state, EnvelopeState::Release);
         }
         // When the envelope is already off, it should stay off
         // and the output value should be 0
         eg.state = EnvelopeState::Off;
         eg.output_value = 0.0;
-        eg.note_off(&parameters);
+        eg.note_off(&parameters, 1000.0);
         assert_eq!(eg.state, EnvelopeState::Off);
         assert_relative_eq!(eg.output_value, 0.0);
     }
@@ -295,7 +296,7 @@ mod tests {
         ] {
             eg.state = state;
             eg.output_value = 0.5;
-            eg.note_on(&parameters);
+            eg.note_on(&parameters, 1000.0);
             assert_eq!(eg.state, EnvelopeState::Attack);
             assert!(eg.output_value < 0.0);
         }
