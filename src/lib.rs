@@ -178,6 +178,9 @@ impl Plugin for FmSynth {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = buffer_config.sample_rate;
+        let num_channels = _audio_io_layout.main_output_channels.unwrap().get() as usize;
+        self.voice
+            .initialize(num_channels, buffer_config.max_buffer_size as usize);
         true
     }
 
@@ -289,16 +292,15 @@ impl Plugin for FmSynth {
                     .smoothed
                     .next_step(num_samples_to_process_u32),
             };
-            let voice_output = self.voice.render(
+            self.voice.render(
                 &self.voice_params,
                 num_samples_to_process.unwrap_or(0),
-                output.len(),
                 self.sample_rate,
             );
-            assert_eq!(voice_output.len(), output.len());
+            assert_eq!(self.voice.voice_output.len(), output.len());
             for i in 0..output.len() {
                 for j in block_start..block_end {
-                    output[i][j] += voice_output[i][j - block_start];
+                    output[i][j] += self.voice.voice_output[i][j - block_start];
                 }
             }
             // And then just keep processing blocks until we've run out of buffer to fill

@@ -16,6 +16,8 @@ pub struct Voice {
     eg: LinearEG,
     // TODO: Add a filter
     id: Option<i32>,
+    // TODO: decide if there should be some other way to handle the output
+    pub voice_output: Vec<Vec<f32>>,
     // TODO: Add gain
     // gain: Smoother<f32>,
 }
@@ -26,28 +28,26 @@ impl Voice {
             core: FmCore::new(),
             eg: LinearEG::new(),
             id: None,
+            voice_output: vec![vec![0.0; 1]; 1],
             // gain: Smoother::new(SmoothingStyle::Linear(1.0)),
         }
     }
-    pub fn render(
-        &mut self,
-        params: &Parameters,
-        num_samples_to_process: usize,
-        channels: usize,
-        sample_rate: f32,
-    ) -> Vec<Vec<f32>> {
+
+    pub fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {
+        self.voice_output = vec![vec![0.0; max_samples_per_channel]; num_channels];
+    }
+
+    pub fn render(&mut self, params: &Parameters, num_samples_to_process: usize, sample_rate: f32) {
         let eg_value = self
             .eg
             .render(&params.eg_params, num_samples_to_process, sample_rate);
-        // make an array of zeros
-        let mut output = vec![vec![0.0; num_samples_to_process]; channels];
+
         for sample_index in 0..num_samples_to_process {
             let core_output = self.core.render();
-            for channel in &mut output {
+            for channel in &mut self.voice_output {
                 channel[sample_index] = core_output * eg_value;
             }
         }
-        output
     }
     pub fn reset(&mut self, params: &Parameters) {
         self.core.reset();
