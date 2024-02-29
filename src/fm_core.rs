@@ -4,7 +4,7 @@ use nih_plug::util;
 
 // An FM core has a single oscillator and an envelope
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FmCore {
     midi_note: u8,
     pub note_velocity: f32, // amplitude in dB
@@ -63,14 +63,8 @@ impl FmCore {
         self.clock.reset();
     }
 
-    pub fn note_off(&mut self, note: u8, voice_id: Option<i32>, midi_channel: u8) {
-        // empty for now
-        // check if the voice_id matches the current voice_id
-        if self.voice_id == voice_id
-            || (self.midi_channel == midi_channel && self.midi_note == note)
-        {
-            self.voice_id = None;
-        }
+    pub fn note_off(&mut self) {
+        self.voice_id = None;
     }
 }
 

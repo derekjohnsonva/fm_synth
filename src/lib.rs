@@ -3,10 +3,10 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 
 mod clock;
+mod consts;
 mod fm_core;
 mod linear_eg;
 mod sin_osc;
-
 mod voice;
 
 /// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed

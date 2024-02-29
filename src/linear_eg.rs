@@ -1,5 +1,7 @@
 use nih_plug::nih_debug_assert;
 
+use crate::consts::{MAX_EG_LEVEL, MIN_EG_LEVEL, SHUTDOWN_TIME_MSEC};
+
 #[derive(Clone)]
 pub struct EGParameters {
     // ADSR times from user
@@ -25,10 +27,6 @@ impl Default for EGParameters {
         }
     }
 }
-
-const MAX_EG_LEVEL: f32 = 1.0;
-const MIN_EG_LEVEL: f32 = 0.0;
-const SHUTDOWN_ITME_MSEC: f32 = 2.0;
 
 /// The `EnvelopeGenerator` trait defines the methods that an envelope generator should implement.
 pub trait EnvelopeGenerator {
@@ -57,10 +55,12 @@ pub trait EnvelopeGenerator {
 
     /// Shuts down the envelope generator. Used for voice stealing.
     fn shutdown(&mut self, parameters: &EGParameters, sample_rate: f32);
+
+    fn is_playing(&self) -> bool;
 }
 
 /// Represents the state of the envelope generator.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum EnvelopeState {
     Off,
     Attack,
@@ -72,6 +72,7 @@ enum EnvelopeState {
 }
 
 /// Represents a linear envelope generator.
+#[derive(Debug, PartialEq, Clone)]
 pub struct LinearEG {
     state: EnvelopeState,
     step_increase: f32,
@@ -202,9 +203,13 @@ impl EnvelopeGenerator for LinearEG {
     }
 
     fn shutdown(&mut self, _parameters: &EGParameters, sample_rate: f32) {
-        self.shutdown_increment = -(1000.0 * self.output_value) / SHUTDOWN_ITME_MSEC / sample_rate;
-        nih_debug_assert!(self.shutdown_increment < 0.0);
+        self.shutdown_increment = -(1000.0 * self.output_value) / SHUTDOWN_TIME_MSEC / sample_rate;
+        nih_debug_assert!(self.shutdown_increment <= 0.0);
         self.state = EnvelopeState::Shutdown;
+    }
+
+    fn is_playing(&self) -> bool {
+        self.state != EnvelopeState::Off
     }
 }
 
@@ -300,5 +305,32 @@ mod tests {
             assert_eq!(eg.state, EnvelopeState::Attack);
             assert!(eg.output_value < 0.0);
         }
+    }
+    #[rstest]
+    fn test_shutdown() {
+        let mut eg = LinearEG::new();
+        let parameters = EGParameters::default();
+        eg.state = EnvelopeState::Off;
+        eg.output_value = 0.0;
+        eg.shutdown(&parameters, 1000.0);
+        assert_eq!(eg.state, EnvelopeState::Shutdown);
+        assert_relative_eq!(eg.output_value, 0.0);
+    }
+
+    #[rstest]
+    fn test_is_playing() {
+        let mut eg = LinearEG::new();
+        for state in [
+            EnvelopeState::Attack,
+            EnvelopeState::Decay,
+            EnvelopeState::Sustain,
+            EnvelopeState::Release,
+            EnvelopeState::Shutdown,
+        ] {
+            eg.state = state;
+            assert!(eg.is_playing());
+        }
+        eg.state = EnvelopeState::Off;
+        assert!(!eg.is_playing());
     }
 }

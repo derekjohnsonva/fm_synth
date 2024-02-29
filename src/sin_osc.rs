@@ -1,11 +1,11 @@
-const TABLE_SIZE: usize = 1024;
+use crate::consts::TABLE_SIZE;
 
 fn linear_interpolation(value1: f32, value2: f32, fraction: f32) -> f32 {
     value1.mul_add(1.0 - fraction, value2 * fraction)
 }
 
 /// Represents a sine wave oscillator.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SinOsc {
     table: [f32; TABLE_SIZE], // Lookup table for storing precomputed sine values
 }

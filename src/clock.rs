@@ -20,7 +20,7 @@ fn wrap_max(value: f32, max: f32) -> f32 {
 fn wrap_min_max(value: f32, min: f32, max: f32) -> f32 {
     min + wrap_max(value - min, max - min)
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Clock {
     // Public fields
     pub mcounter: f32,     // modulo counter [0.0, +1.0], this is the value you use
