@@ -1,4 +1,4 @@
-use nih_plug::nih_dbg;
+use nih_plug::nih_log;
 
 use crate::fm_core::FmCore;
 // A voice should contain an oscillator, an envelope, and a filter
@@ -127,8 +127,11 @@ impl Voice {
         params: &Parameters,
         sample_rate: f32,
     ) {
+        // print "note on" plus the note number
+        nih_log!("Note on; note = {}", note);
         // Check to see if the voice is already playing a note. If so, we need to steal the voice.
         if self.eg.is_playing() {
+            nih_log!("Stealing");
             self.is_stealing = true;
             self.next_midi_event = Some(MidiEvent {
                 timing: 0,
@@ -159,6 +162,8 @@ impl Voice {
         params: &Parameters,
         sample_rate: f32,
     ) {
+        // print "note off" plus the note number
+        nih_log!("Note off; note = {}", note);
         if let Some(midi_event) = &self.current_midi_event {
             if midi_event.voice_id == voice_id
                 || (midi_event.channel == channel && midi_event.note == note)
@@ -305,5 +310,32 @@ mod tests {
                 assert_relative_eq!(sample, 0.0);
             }
         }
+    }
+
+    // Write a test to assert that when we play a note on immediately after a note off, we enter the steal state
+    #[rstest]
+    fn test_note_on_after_note_off() {
+        let mut voice = Voice::new();
+        let params = Parameters {
+            eg_params: EGParameters {
+                attack_time_msec: 10.0,
+                decay_time_msec: 10.0,
+                release_time_msec: 10.0,
+                start_level: 0.0,
+                sustain_level: 0.1,
+            },
+        };
+        let sample_rate = 1000.0;
+        let num_samples_to_process = sample_rate * params.eg_params.attack_time_msec / 1000.0;
+        voice.initialize(2, num_samples_to_process as usize);
+        let note = 60;
+        voice.note_on(note, 0.5, Some(1), 0, &params, sample_rate);
+        voice.render(&params, num_samples_to_process as usize, sample_rate);
+        voice.note_off(Some(1), 0, note, &params, sample_rate);
+        // We are at the end of the attack phase
+        voice.render(&params, 1, sample_rate);
+        let note_2 = 61;
+        voice.note_on(note_2, 0.5, Some(1), 0, &params, sample_rate);
+        assert!(voice.is_stealing);
     }
 }
