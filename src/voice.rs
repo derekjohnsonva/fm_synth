@@ -27,6 +27,7 @@ pub struct MidiEvent {
     /// 128 levels available in MIDI.
     velocity: f32,
 }
+
 #[derive(PartialEq, Clone)]
 pub struct Voice {
     core: FmCore,
@@ -98,6 +99,8 @@ impl Voice {
                     sample_rate,
                 );
             }
+            // Note: it is possible we received the `note_off` event for the `next_midi_event` during the steal
+            // operation and so there is nothing to be done here.
             self.current_midi_event = self.next_midi_event.take();
 
             if let Some(midi_event) = &self.current_midi_event {
@@ -154,6 +157,12 @@ impl Voice {
             self.eg.note_on(&params.eg_params, sample_rate);
         }
     }
+    /// This function is called when a note off event is received.
+    /// There are a few cases to consider:
+    /// 1) The note off event is unrelated to the `current_midi_event`. We should ignore it.
+    /// 2) The note off event is related to the `current_midi_event`, but the voice is in the stealing state. We should ignore it.
+    /// 3) The note off event is related to the `next_midi_event`, and the voice is in the stealing state. We should
+    ///    finish the note steal but we should not process the note off event as the `note_on` event has not been processed yet.
     pub fn note_off(
         &mut self,
         voice_id: Option<i32>,
@@ -162,12 +171,20 @@ impl Voice {
         params: &Parameters,
         sample_rate: f32,
     ) {
-        // print "note off" plus the note number
-        nih_log!("Note off; note = {}", note);
-        if let Some(midi_event) = &self.current_midi_event {
+        if self.is_stealing {
+            if let Some(midi_event) = &self.next_midi_event {
+                if midi_event.voice_id == voice_id
+                    || (midi_event.channel == channel && midi_event.note == note)
+                {
+                    // we are in the 3rd case
+                    self.next_midi_event = None;
+                }
+            }
+        } else if let Some(midi_event) = &self.current_midi_event {
             if midi_event.voice_id == voice_id
                 || (midi_event.channel == channel && midi_event.note == note)
             {
+                nih_log!("Note off matches current midi event");
                 self.eg.note_off(&params.eg_params, sample_rate);
                 self.core.note_off();
                 self.current_midi_event = None;
@@ -337,5 +354,45 @@ mod tests {
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, sample_rate);
         assert!(voice.is_stealing);
+    }
+
+    #[rstest]
+    fn test_note_off_guard() {
+        // write a test for the three guard cases of the note off function
+        let mut voice = Voice::new();
+        let params = Parameters {
+            eg_params: EGParameters {
+                attack_time_msec: 10.0,
+                decay_time_msec: 10.0,
+                release_time_msec: 10.0,
+                start_level: 0.0,
+                sustain_level: 0.1,
+            },
+        };
+        let sample_rate = 1000.0;
+        let num_samples_to_process = sample_rate * params.eg_params.attack_time_msec / 1000.0;
+        voice.initialize(2, num_samples_to_process as usize);
+        let note = 60;
+        voice.note_on(note, 0.5, Some(1), 0, &params, sample_rate);
+        voice.render(&params, num_samples_to_process as usize, sample_rate);
+        // different note and voice_id - should have no effect
+        assert!(voice.current_midi_event.is_some());
+        voice.note_off(Some(2), 0, note + 1, &params, sample_rate);
+        assert!(voice.current_midi_event.is_some());
+        // different channel and voice_id - should have no effect
+        voice.note_off(Some(2), 1, note, &params, sample_rate);
+        assert!(voice.current_midi_event.is_some());
+        // Enter the steal state
+        let note_2 = 61;
+        voice.note_on(note_2, 0.5, Some(2), 0, &params, sample_rate);
+        assert!(voice.is_stealing);
+        // process the note off event for the first note - should have no effect
+        voice.note_off(Some(1), 0, note, &params, sample_rate);
+        assert!(voice.is_stealing);
+        // process the note off event for the second note - should have no effect except for removing the next midi event
+        assert!(voice.next_midi_event.is_some());
+        voice.note_off(Some(2), 0, note_2, &params, sample_rate);
+        assert!(voice.is_stealing);
+        assert!(voice.next_midi_event.is_none());
     }
 }

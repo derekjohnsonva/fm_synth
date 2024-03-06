@@ -210,54 +210,54 @@ impl Plugin for FmSynth {
         let mut block_end: usize = MAX_BLOCK_SIZE.min(num_samples);
 
         while block_start < num_samples {
-            // We have three things that can happen in a block:
-            // 1. The block ends before the next event
-            // 2. The next event happens before the block ends. In this case, we have to split the
-            // block and process the event. We then continue with the next block.
-            // 3. The block ends at the same time as the next event. In this case, we process the
-            // event and continue with the next block.
-            // To handle these cases, we will only process events at the start of a block. If an event
-            // happens in the middle of a block, we will process it at the start of the next block.
-            match next_event {
-                Some(event) if (event.timing() as usize) <= block_start => {
-                    match event {
-                        NoteEvent::NoteOn {
-                            note,
-                            velocity,
-                            voice_id,
-                            channel,
-                            ..
-                        } => {
-                            self.voice.note_on(
+            // In each block of samples, we need to check for note events. We will split audio rendering
+            // into sub-blocks based on the timing of the note events. If we have a note event at the start of the
+            // block, we will update the voice parameters.
+
+            'events: loop {
+                match next_event {
+                    Some(event) if (event.timing() as usize) <= block_start => {
+                        nih_dbg!(event);
+                        match event {
+                            NoteEvent::NoteOn {
                                 note,
                                 velocity,
                                 voice_id,
                                 channel,
+                                ..
+                            } => {
+                                self.voice.note_on(
+                                    note,
+                                    velocity,
+                                    voice_id,
+                                    channel,
+                                    &self.voice_params,
+                                    self.sample_rate,
+                                );
+                            }
+                            NoteEvent::NoteOff {
+                                note,
+                                voice_id,
+                                channel,
+                                ..
+                            } => self.voice.note_off(
+                                voice_id,
+                                channel,
+                                note,
                                 &self.voice_params,
                                 self.sample_rate,
-                            );
-                        }
-                        NoteEvent::NoteOff {
-                            note,
-                            voice_id,
-                            channel,
-                            ..
-                        } => self.voice.note_off(
-                            voice_id,
-                            channel,
-                            note,
-                            &self.voice_params,
-                            self.sample_rate,
-                        ),
-                        _ => {}
-                    }
+                            ),
+                            _ => {}
+                        };
 
-                    next_event = context.next_event();
+                        next_event = context.next_event();
+                    }
+                    Some(event) if (event.timing() as usize) < block_end => {
+                        block_end = event.timing() as usize;
+                        break 'events;
+                    }
+                    _ => break 'events,
                 }
-                Some(event) if (event.timing() as usize) < block_end => {
-                    block_end = event.timing() as usize;
-                }
-                _ => (),
             }
 
             // fill the buffer from the start of the block to the end of the block with zeros
