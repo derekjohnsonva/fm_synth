@@ -72,15 +72,7 @@ impl FmCore {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use rstest::*;
-
-    #[fixture]
-    fn setup() {
-        #[allow(clippy::unwrap_used)]
-        color_eyre::install().unwrap();
-    }
-
-    #[rstest]
+    #[test]
     fn test_render() {
         let frequency = 440.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

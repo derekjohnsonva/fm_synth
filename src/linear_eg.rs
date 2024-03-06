@@ -217,15 +217,8 @@ impl EnvelopeGenerator for LinearEG {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use rstest::*;
 
-    #[fixture]
-    fn setup() {
-        #[allow(clippy::unwrap_used)]
-        color_eyre::install().unwrap();
-    }
-
-    #[rstest]
+    #[test]
     fn test_render_attack() {
         let mut eg = LinearEG::new();
         let parameters = EGParameters {
@@ -252,7 +245,7 @@ mod tests {
         // assert_relative_eq!(eg.output_value, 1.0);
     }
 
-    #[rstest]
+    #[test]
     fn test_calc_step_increase() {
         let sample_rate = 1000.0;
         let time_ms = 100.0;
@@ -261,7 +254,7 @@ mod tests {
         assert_relative_eq!(step_increase, 0.01);
     }
 
-    #[rstest]
+    #[test]
     fn test_note_off() {
         let mut eg = LinearEG::new();
         // Check that if the eg is in attack mode, it switches to release mode
@@ -286,7 +279,7 @@ mod tests {
         assert_relative_eq!(eg.output_value, 0.0);
     }
 
-    #[rstest]
+    #[test]
     fn test_note_on() {
         let mut eg = LinearEG::new();
         let parameters = EGParameters::default();
@@ -306,7 +299,7 @@ mod tests {
             assert!(eg.output_value < 0.0);
         }
     }
-    #[rstest]
+    #[test]
     fn test_shutdown() {
         let mut eg = LinearEG::new();
         let parameters = EGParameters::default();
@@ -317,7 +310,7 @@ mod tests {
         assert_relative_eq!(eg.output_value, 0.0);
     }
 
-    #[rstest]
+    #[test]
     fn test_is_playing() {
         let mut eg = LinearEG::new();
         for state in [

@@ -198,21 +198,14 @@ mod tests {
     use super::*;
     use crate::consts::SHUTDOWN_TIME_MSEC;
     use approx::assert_relative_eq;
-    use rstest::*;
 
-    #[fixture]
-    fn setup() {
-        #[allow(clippy::unwrap_used)]
-        color_eyre::install().unwrap();
-    }
-
-    #[rstest]
+    #[test]
     fn test_voice_new() {
         let voice = Voice::new();
         assert_eq!(voice.voice_output, vec![vec![0.0; 1]; 1]);
     }
 
-    #[rstest]
+    #[test]
     fn test_voice_stealing() {
         let mut voice = Voice::new();
         let params = Parameters {
@@ -255,7 +248,7 @@ mod tests {
     }
 
     /// Test what happens when a new note on event is received while the voice is in the stealing state
-    #[rstest]
+    #[test]
     fn test_note_on_during_steal() {
         let mut voice = Voice::new();
         let params = Parameters {
@@ -297,7 +290,7 @@ mod tests {
         // Assert that the next midi
     }
 
-    #[rstest]
+    #[test]
     fn test_note_on_and_off() {
         let mut voice = Voice::new();
         let params = Parameters {
@@ -330,7 +323,7 @@ mod tests {
     }
 
     // Write a test to assert that when we play a note on immediately after a note off, we enter the steal state
-    #[rstest]
+    #[test]
     fn test_note_on_after_note_off() {
         let mut voice = Voice::new();
         let params = Parameters {
@@ -356,7 +349,7 @@ mod tests {
         assert!(voice.is_stealing);
     }
 
-    #[rstest]
+    #[test]
     fn test_note_off_guard() {
         // write a test for the three guard cases of the note off function
         let mut voice = Voice::new();

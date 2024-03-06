@@ -121,15 +121,8 @@ impl Clock {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use rstest::*;
 
-    #[fixture]
-    fn setup() {
-        #[allow(clippy::unwrap_used)]
-        color_eyre::install().unwrap();
-    }
-
-    #[rstest]
+    #[test]
     fn test_wrap_min_max() {
         assert_relative_eq!(wrap_min_max(0.5, 0.0, 1.0), 0.5);
         assert_relative_eq!(wrap_min_max(1.5, 0.0, 1.0), 0.5);
@@ -138,7 +131,7 @@ mod tests {
         assert_relative_eq!(wrap_min_max(2.5, 0.0, 1.0), 0.5);
     }
 
-    #[rstest]
+    #[test]
     fn test_advance_clock() {
         let mut clock = Clock::new();
         clock.advance_clock(0.1);
@@ -153,7 +146,7 @@ mod tests {
         assert_relative_eq!(clock.mcounter, 0.7);
     }
 
-    #[rstest]
+    #[test]
     fn test_wrap_clock() {
         let mut clock = Clock::new();
         clock.mcounter = 1.5;
@@ -169,7 +162,7 @@ mod tests {
         assert_relative_eq!(clock.mcounter, 0.8);
     }
 
-    #[rstest]
+    #[test]
     fn test_advance_wrap_clock() {
         let mut clock = Clock::new();
         clock.phase_inc = 1.0;
@@ -185,7 +178,7 @@ mod tests {
         assert_relative_eq!(clock.mcounter, 0.6);
     }
 
-    #[rstest]
+    #[test]
     fn test_set_freq() {
         let mut clock = Clock::new();
         clock.set_freq(440.0, 44100.0);
@@ -193,7 +186,7 @@ mod tests {
         assert_relative_eq!(clock.phase_inc, 440.0 / 44100.0);
     }
 
-    #[rstest]
+    #[test]
     fn test_add_phase_offset() {
         let mut clock = Clock::new();
         clock.phase_inc = 1.0;

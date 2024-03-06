@@ -58,21 +58,15 @@ impl SinOsc {
 mod tests {
     use super::*;
     use approx::{assert_relative_eq, assert_relative_ne};
-    use rstest::*;
 
-    #[fixture]
-    fn setup() {
-        #[allow(clippy::unwrap_used)]
-        color_eyre::install().unwrap();
-    }
-    #[rstest]
+    #[test]
     fn test_sin_vals() {
         // Make sure the last value in the table is not 0.0 so we don't get pops
         let osc = SinOsc::new();
         assert_relative_ne!(osc.table[TABLE_SIZE - 1], 0.0);
     }
 
-    #[rstest]
+    #[test]
     fn test_linear_interpolation() {
         // Test case 1: value1 = 0.0, value2 = 1.0, fraction = 0.5
         let result1 = linear_interpolation(0.0, 1.0, 0.5);
@@ -87,7 +81,7 @@ mod tests {
         assert_relative_eq!(result3, 17.5);
     }
 
-    #[rstest]
+    #[test]
     fn read_osc_test() {
         let mut osc = SinOsc::new();
 
