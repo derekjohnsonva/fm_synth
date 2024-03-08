@@ -8,6 +8,7 @@ mod fm_core;
 mod linear_eg;
 mod sin_osc;
 mod voice;
+mod voice_group;
 
 /// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed
 /// values to buffers since these values may need to be reused for multiple voices.
@@ -16,7 +17,7 @@ const MAX_BLOCK_SIZE: usize = 64;
 pub struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
-    voice: voice::Voice,
+    voices: voice_group::VoiceGroup,
     voice_params: voice::Parameters,
     sample_rate: f32,
 }
@@ -40,13 +41,15 @@ struct FmSynthParams {
     pub sustain_level: FloatParam,
     #[id = "release_time"]
     pub release_time: FloatParam,
+    #[id = "num_voices"]
+    pub num_voices: IntParam,
 }
 
 impl Default for FmSynth {
     fn default() -> Self {
         Self {
             params: Arc::new(FmSynthParams::default()),
-            voice: voice::Voice::new(),
+            voices: voice_group::VoiceGroup::new(),
             voice_params: voice::Parameters::default(),
             sample_rate: 0.0,
         }
@@ -122,6 +125,14 @@ impl Default for FmSynthParams {
                     max: 1000.0,
                 },
             ),
+            num_voices: IntParam::new(
+                "Number of Voices",
+                4,
+                IntRange::Linear {
+                    min: 1,
+                    max: consts::MAX_VOICES as i32,
+                },
+            ),
         }
     }
 }
@@ -178,16 +189,15 @@ impl Plugin for FmSynth {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = buffer_config.sample_rate;
-        let num_channels = _audio_io_layout.main_output_channels.unwrap().get() as usize;
-        self.voice
-            .initialize(num_channels, buffer_config.max_buffer_size as usize);
+        self.voices
+            .initialize(4, buffer_config.max_buffer_size as usize);
         true
     }
 
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
-        self.voice.reset(&self.voice_params);
+        self.voices.reset(&self.voice_params);
     }
     #[allow(clippy::cast_possible_truncation)]
     fn process(
@@ -201,7 +211,14 @@ impl Plugin for FmSynth {
         // num_remaining_samples, next_event_idx - block_start_idx)`. Because blocks also need to be
         // split on note events, it's easier to work with raw audio here and to do the splitting by
         // hand.
+
         let num_samples = buffer.samples();
+        self.voices.update_num_voices(
+            self.params
+                .num_voices
+                .smoothed
+                .next_step(num_samples as u32) as usize,
+        );
         self.sample_rate = context.transport().sample_rate;
         let output = buffer.as_slice();
 
@@ -226,7 +243,7 @@ impl Plugin for FmSynth {
                                 channel,
                                 ..
                             } => {
-                                self.voice.note_on(
+                                self.voices.note_on(
                                     note,
                                     velocity,
                                     voice_id,
@@ -240,7 +257,7 @@ impl Plugin for FmSynth {
                                 voice_id,
                                 channel,
                                 ..
-                            } => self.voice.note_off(
+                            } => self.voices.note_off(
                                 voice_id,
                                 channel,
                                 note,
@@ -260,13 +277,6 @@ impl Plugin for FmSynth {
                 }
             }
 
-            // fill the buffer from the start of the block to the end of the block with zeros
-            // This will make it easier when we turn this into a poly synth
-            for channel in output.iter_mut() {
-                channel[block_start..block_end].fill(0.0);
-            }
-
-            // Get the Envelope generator value
             let num_samples_to_process = block_end.checked_sub(block_start);
             let num_samples_to_process_u32 = num_samples_to_process.unwrap_or(0) as u32;
             self.voice_params.eg_params = linear_eg::EGParameters {
@@ -292,17 +302,13 @@ impl Plugin for FmSynth {
                     .smoothed
                     .next_step(num_samples_to_process_u32),
             };
-            self.voice.render(
+            self.voices.render(
+                output,
                 &self.voice_params,
-                num_samples_to_process.unwrap_or(0),
                 self.sample_rate,
+                block_start,
+                block_end,
             );
-            assert_eq!(self.voice.voice_output.len(), output.len());
-            for i in 0..output.len() {
-                for j in block_start..block_end {
-                    output[i][j] += self.voice.voice_output[i][j - block_start];
-                }
-            }
             // And then just keep processing blocks until we've run out of buffer to fill
             block_start = block_end;
             block_end = (block_start + MAX_BLOCK_SIZE).min(num_samples);
