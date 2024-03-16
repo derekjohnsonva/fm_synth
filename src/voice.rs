@@ -38,8 +38,9 @@ pub struct Voice {
     is_stealing: bool,
     current_midi_event: Option<MidiEvent>,
     next_midi_event: Option<MidiEvent>,
-    // TODO: Add gain
-    // gain: Smoother<f32>,
+    output_buffer: Vec<Vec<f32>>, // 2D output buffer for stereo
+                                  // TODO: Add gain
+                                  // gain: Smoother<f32>,
 }
 // Write a debug implementation for Voice
 impl std::fmt::Debug for Voice {
@@ -63,15 +64,17 @@ impl Voice {
             is_stealing: false,
             current_midi_event: None,
             next_midi_event: None,
+            output_buffer: vec![vec![0.0; 1]; 2],
             // gain: Smoother::new(SmoothingStyle::Linear(1.0)),
         }
     }
 
-    // pub fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {}
+    pub fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {
+        self.output_buffer = vec![vec![0.0; max_samples_per_channel]; num_channels];
+    }
 
-    pub fn render(&mut self, audio_buffer: &mut [f32], params: &Parameters, sample_rate: f32) {
+    pub fn render(&mut self, num_samples_to_process: usize, params: &Parameters, sample_rate: f32) {
         // get the length of the audio buffer
-        let num_samples_to_process = audio_buffer.len();
         let eg_value = self
             .eg
             .render(&params.eg_params, num_samples_to_process, sample_rate);
@@ -79,7 +82,10 @@ impl Voice {
         // add the core output to the audio_buffer
         for sample_index in 0..num_samples_to_process {
             let core_output = self.core.render();
-            audio_buffer[sample_index] += core_output * eg_value;
+            // add the core output to the different channels
+            for channel in self.output_buffer.iter_mut() {
+                channel[sample_index] = core_output * eg_value;
+            }
         }
         // Check the stealPending flag to see if the voice is being stolen, and if so:
         if self.is_stealing && !self.eg.is_playing() {
@@ -191,6 +197,19 @@ impl Voice {
     pub fn is_playing(&self) -> bool {
         self.eg.is_playing()
     }
+
+    pub fn accumulate_output(
+        &mut self,
+        audio_buffer: &mut [&mut [f32]],
+        block_start: usize,
+        block_end: usize,
+    ) {
+        for (channel, output) in audio_buffer.iter_mut().enumerate() {
+            for (sample_index, sample) in output[block_start..block_end].iter_mut().enumerate() {
+                *sample += self.output_buffer[channel][sample_index];
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -222,12 +241,13 @@ mod tests {
         // Do a note on
         const SAMPLES_RATE: f32 = 44100.0;
         let note_1 = 60;
+        voice.initialize(2, 1024);
         voice.note_on(note_1, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         // Assert that we are not in the stealing state
         assert_eq!(voice.is_stealing, false);
         // render a couple of samples so that the envelope is in the attack phase and there is a non-zero output
         let audio_buffer = &mut [0.0; 10];
-        voice.render(audio_buffer, &params, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Do another note on
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLES_RATE);
@@ -238,12 +258,12 @@ mod tests {
             (SAMPLES_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         // render one less sample than it takes to escape the stealing state
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS_2];
-        voice.render(audio_buffer, &params, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Assert that we are in the stealing state
         assert_eq!(voice.is_stealing, true);
         // render enough samples to escape the stealing state
         let audio_buffer = &mut [0.0; 1];
-        voice.render(audio_buffer, &params, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Assert that we are not in the stealing state
         assert_eq!(voice.is_stealing, false);
         // Assert that the current midi event is the second note on
@@ -258,12 +278,13 @@ mod tests {
         // Do a note on
         const SAMPLE_RATE: f32 = 44100.0;
         let note_1 = 60;
+        voice.initialize(2, 1024);
         voice.note_on(note_1, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are not in the stealing state
         assert_eq!(voice.is_stealing, false);
         // render a couple of samples so that the envelope is in the attack phase and there is a non-zero output
         let audio_buffer = &mut [0.0; 10];
-        voice.render(audio_buffer, &params, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         // Do another note on
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLE_RATE);
@@ -278,7 +299,7 @@ mod tests {
         const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         // render one less sample than it takes to escape the stealing state
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS + 1];
-        voice.render(audio_buffer, &params, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         // Assert that we are not in the stealing state
         assert_eq!(voice.is_stealing, false);
         // Assert that the current midi event is the third note on
@@ -302,19 +323,20 @@ mod tests {
         const NUM_SAMPLES_TO_PROCESS: usize =
             (SAMPLE_RATE * PARAMS.eg_params.release_time_msec / 1000.0) as usize;
         let note = 60;
+        voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
         voice.note_on(note, 0.5, Some(1), 0, &PARAMS, SAMPLE_RATE);
         let audio_buffer = &mut [0.0; 10];
-        voice.render(audio_buffer, &PARAMS, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         voice.note_off(Some(1), 0, note, &PARAMS, SAMPLE_RATE);
         assert_eq!(voice.eg.is_playing(), true);
         // find the number of samples it takes to reach the off phase
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
 
-        voice.render(audio_buffer, &PARAMS, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         assert!(voice.eg.is_playing() == false);
         assert_relative_eq!(voice.eg.render(&PARAMS.eg_params, 1, SAMPLE_RATE), 0.0);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
-        voice.render(audio_buffer, &PARAMS, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         // assert that the audio buffer is zero
         audio_buffer.into_iter().for_each(|sample| {
             assert_relative_eq!(*sample, 0.0);
@@ -337,13 +359,14 @@ mod tests {
         const NUM_SAMPLES_TO_PROCESS: usize =
             (SAMPLES_RATE * PARAMS.eg_params.attack_time_msec / 1000.0) as usize;
         let note = 60;
+        voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
         voice.note_on(note, 0.5, Some(1), 0, &PARAMS, SAMPLES_RATE);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
-        voice.render(audio_buffer, &PARAMS, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &PARAMS, SAMPLES_RATE);
         voice.note_off(Some(1), 0, note, &PARAMS, SAMPLES_RATE);
         // We are at the end of the attack phase
         let audio_buffer = &mut [0.0; 1];
-        voice.render(audio_buffer, &PARAMS, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &PARAMS, SAMPLES_RATE);
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &PARAMS, SAMPLES_RATE);
         assert!(voice.is_stealing);
@@ -355,9 +378,10 @@ mod tests {
         const ATTACK_TIME_MS: f32 = 10.0;
         const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * ATTACK_TIME_MS / 1000.0) as usize;
         let note = 60;
+        voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
         voice.note_on(note, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
-        voice.render(audio_buffer, &params, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         // different note and voice_id - should have no effect
         assert!(voice.current_midi_event.is_some());
         voice.note_off(Some(2), 0, note + 1, &params, SAMPLE_RATE);

@@ -181,7 +181,7 @@ impl Plugin for FmSynth {
 
     fn initialize(
         &mut self,
-        _audio_io_layout: &AudioIOLayout,
+        audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
@@ -189,8 +189,16 @@ impl Plugin for FmSynth {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = buffer_config.sample_rate;
-        self.voices
-            .initialize(4, buffer_config.max_buffer_size as usize);
+        // get the number of output channels
+        let num_channels = audio_io_layout
+            .main_output_channels
+            .map(NonZeroU32::get)
+            .unwrap_or(2);
+        self.voices.initialize(
+            4,
+            num_channels as usize,
+            buffer_config.max_buffer_size as usize,
+        );
         true
     }
 

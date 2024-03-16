@@ -8,29 +8,35 @@ use crate::voice::Voice;
 pub struct VoiceGroup {
     voices: Vec<Voice>,
     voice_timings: Vec<i32>,
-    output: Vec<f32>,
 }
 
 impl VoiceGroup {
     pub fn new() -> Self {
         let voices = Vec::with_capacity(MAX_VOICES);
         let voice_timings = Vec::with_capacity(MAX_VOICES);
-        let output = vec![0.0; 1];
 
         VoiceGroup {
             voices,
             voice_timings,
-            output,
         }
     }
 
-    pub fn initialize(&mut self, num_voices: usize, max_samples_per_channel: usize) {
+    pub fn initialize(
+        &mut self,
+        num_voices: usize,
+        num_channels: usize,
+        max_samples_per_channel: usize,
+    ) {
+        self.voices.clear();
+        self.voice_timings.clear();
         assert!(num_voices <= MAX_VOICES, "num_voices must be <= MAX_VOICES");
         for _ in 0..num_voices {
             self.voices.push(Voice::new());
             self.voice_timings.push(0);
         }
-        self.output = vec![0.0; max_samples_per_channel];
+        self.voices
+            .iter_mut()
+            .for_each(|voice| voice.initialize(num_channels, max_samples_per_channel));
     }
 
     pub fn render(
@@ -41,25 +47,16 @@ impl VoiceGroup {
         block_start: usize,
         block_end: usize,
     ) {
-        // zero out the output buffer
-        self.output.fill(0.0);
         // Accumulate the outputs from all voices
         let block_size = block_end - block_start;
-        assert!(
-            block_size <= self.output.len(),
-            "block_size must be <= output.len()"
-        );
+
         for voice in &mut self.voices {
             // Render the voice into the temporary buffer
-            voice.render(&mut self.output[0..block_size], params, sample_rate);
+            voice.render(block_size, params, sample_rate);
         }
-        for channel in audio_buffer.iter_mut() {
-            channel[block_start..block_end]
-                .iter_mut()
-                .zip(&self.output)
-                .for_each(|(sample, temp_sample)| {
-                    *sample = *temp_sample;
-                });
+        // Accumulate the outputs from all voices
+        for voice in self.voices.iter_mut() {
+            voice.accumulate_output(audio_buffer, block_start, block_end)
         }
     }
     pub fn reset(&mut self, params: &Parameters) {
@@ -155,7 +152,7 @@ mod tests {
     #[test]
     fn test_get_oldest_voice() {
         let mut voice_group = VoiceGroup::new();
-        voice_group.initialize(4, 1024);
+        voice_group.initialize(4, 2, 1024);
         voice_group.voice_timings = vec![0, 1, 2, 3];
         assert_eq!(voice_group.get_oldest_voice(), Some(3));
 
@@ -171,7 +168,7 @@ mod tests {
     #[test]
     fn test_update_num_voices() {
         let mut voice_group = VoiceGroup::new();
-        voice_group.initialize(4, 1024);
+        voice_group.initialize(4, 2, 1024);
         voice_group.update_num_voices(6);
         assert_eq!(voice_group.voices.len(), 6);
         assert_eq!(voice_group.voice_timings.len(), 6);
@@ -185,7 +182,7 @@ mod tests {
     #[test]
     fn test_render() {
         let mut voice_group = VoiceGroup::new();
-        voice_group.initialize(4, 1024);
+        voice_group.initialize(4, 2, 1024);
         let mut audio_buffer = vec![vec![0.0; 1024], vec![0.0; 1024]];
         let audio_buffer_slices: &mut [&mut [f32]] = &mut audio_buffer
             .iter_mut()
