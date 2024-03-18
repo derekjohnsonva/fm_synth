@@ -6,17 +6,21 @@ use crate::voice::Parameters;
 use crate::voice::Voice;
 
 pub struct VoiceGroup {
-    voices: Vec<Voice>,
+    // TODO: Identify if using an active an inactive vec is the best approach
+    active_voices: Vec<Voice>,
+    inactive_voices: Vec<Voice>,
     voice_timings: Vec<i32>,
 }
 
 impl VoiceGroup {
     pub fn new() -> Self {
-        let voices = Vec::with_capacity(MAX_VOICES);
+        let active_voices = Vec::with_capacity(MAX_VOICES);
+        let inactive_voices = Vec::with_capacity(MAX_VOICES);
         let voice_timings = Vec::with_capacity(MAX_VOICES);
 
         VoiceGroup {
-            voices,
+            active_voices,
+            inactive_voices,
             voice_timings,
         }
     }
@@ -27,16 +31,18 @@ impl VoiceGroup {
         num_channels: usize,
         max_samples_per_channel: usize,
     ) {
-        self.voices.clear();
+        self.active_voices.clear();
         self.voice_timings.clear();
         assert!(num_voices <= MAX_VOICES, "num_voices must be <= MAX_VOICES");
+        for _ in 0..MAX_VOICES {
+            let mut voice = Voice::new();
+            voice.initialize(num_channels, max_samples_per_channel);
+            self.inactive_voices.push(voice);
+        }
         for _ in 0..num_voices {
-            self.voices.push(Voice::new());
+            self.active_voices.push(self.inactive_voices.pop().unwrap());
             self.voice_timings.push(0);
         }
-        self.voices
-            .iter_mut()
-            .for_each(|voice| voice.initialize(num_channels, max_samples_per_channel));
     }
 
     pub fn render(
@@ -50,17 +56,19 @@ impl VoiceGroup {
         // Accumulate the outputs from all voices
         let block_size = block_end - block_start;
 
-        for voice in &mut self.voices {
+        for voice in &mut self.active_voices {
             // Render the voice into the temporary buffer
             voice.render(block_size, params, sample_rate);
         }
         // Accumulate the outputs from all voices
-        for voice in self.voices.iter_mut() {
+        for voice in self.active_voices.iter_mut() {
             voice.accumulate_output(audio_buffer, block_start, block_end)
         }
     }
     pub fn reset(&mut self, params: &Parameters) {
-        self.voices.iter_mut().for_each(|voice| voice.reset(params));
+        self.active_voices
+            .iter_mut()
+            .for_each(|voice| voice.reset(params));
         self.voice_timings.iter_mut().for_each(|timing| *timing = 0);
     }
     pub fn note_on(
@@ -79,13 +87,20 @@ impl VoiceGroup {
                 .unwrap_or_else(|| Self::compute_fallback_voice_id(note, channel))
         });
         nih_log!("voice_index chosen: {}", voice_index);
-        self.voices[voice_index].note_on(note, velocity, voice_id, channel, params, sample_rate);
+        self.active_voices[voice_index].note_on(
+            note,
+            velocity,
+            voice_id,
+            channel,
+            params,
+            sample_rate,
+        );
         // for all voice that are currently playing, increment the timing
         self.voice_timings
             .iter_mut()
             .enumerate()
             .for_each(|(index, timing)| {
-                if self.voices[index].is_playing() {
+                if self.active_voices[index].is_playing() {
                     *timing += 1;
                 }
             });
@@ -98,7 +113,7 @@ impl VoiceGroup {
         params: &Parameters,
         sample_rate: f32,
     ) {
-        for voice in self.voices.iter_mut() {
+        for voice in self.active_voices.iter_mut() {
             voice.note_off(voice_id, channel, note, params, sample_rate);
         }
     }
@@ -109,17 +124,17 @@ impl VoiceGroup {
             "new_num_voices must be <= MAX_VOICES"
         );
         assert!(new_num_voices > 0, "new_num_voices must be > 0");
-        if new_num_voices > self.voices.len() {
-            for _ in 0..new_num_voices - self.voices.len() {
-                let new_voice = Voice::new();
-                self.voices.push(new_voice);
+        if new_num_voices > self.active_voices.len() {
+            for _ in 0..new_num_voices - self.active_voices.len() {
+                self.active_voices.push(self.inactive_voices.pop().unwrap());
                 self.voice_timings.push(0);
             }
         } else {
-            while new_num_voices < self.voices.len() {
+            while new_num_voices < self.active_voices.len() {
                 // get the oldest voice
                 if let Some(oldest_voice) = self.get_oldest_voice() {
-                    self.voices.remove(oldest_voice);
+                    self.inactive_voices
+                        .push(self.active_voices.remove(oldest_voice));
                     self.voice_timings.remove(oldest_voice);
                 }
             }
@@ -135,7 +150,9 @@ impl VoiceGroup {
     }
 
     fn get_free_voice(&self) -> Option<usize> {
-        self.voices.iter().position(|voice| !voice.is_playing())
+        self.active_voices
+            .iter()
+            .position(|voice| !voice.is_playing())
     }
     /// Compute a voice ID in case the host doesn't provide them. Polyphonic modulation will not work in
     /// this case, but playing notes will.
@@ -170,11 +187,11 @@ mod tests {
         let mut voice_group = VoiceGroup::new();
         voice_group.initialize(4, 2, 1024);
         voice_group.update_num_voices(6);
-        assert_eq!(voice_group.voices.len(), 6);
+        assert_eq!(voice_group.active_voices.len(), 6);
         assert_eq!(voice_group.voice_timings.len(), 6);
         voice_group.voice_timings = vec![0, 5, 2, 4, 1, 3];
         voice_group.update_num_voices(2);
-        assert_eq!(voice_group.voices.len(), 2);
+        assert_eq!(voice_group.active_voices.len(), 2);
         assert_eq!(voice_group.voice_timings.len(), 2);
         assert_eq!(voice_group.voice_timings, vec![0, 1]);
     }
