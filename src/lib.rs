@@ -1,4 +1,5 @@
 use nih_plug::prelude::*;
+use sin_voice::SinVoice;
 
 use std::sync::Arc;
 
@@ -7,8 +8,9 @@ mod consts;
 mod fm_core;
 mod linear_eg;
 mod sin_osc;
-mod voice;
+mod sin_voice;
 mod voice_group;
+mod voice_utils;
 
 /// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed
 /// values to buffers since these values may need to be reused for multiple voices.
@@ -17,8 +19,8 @@ const MAX_BLOCK_SIZE: usize = 64;
 pub struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
-    voices: voice_group::VoiceGroup,
-    voice_params: voice::Parameters,
+    voices: voice_group::VoiceGroup<SinVoice>,
+    voice_params: voice_utils::Parameters,
     sample_rate: f32,
 }
 
@@ -50,7 +52,7 @@ impl Default for FmSynth {
         Self {
             params: Arc::new(FmSynthParams::default()),
             voices: voice_group::VoiceGroup::new(),
-            voice_params: voice::Parameters::default(),
+            voice_params: voice_utils::Parameters::default(),
             sample_rate: 0.0,
         }
     }

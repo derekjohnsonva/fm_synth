@@ -1,18 +1,17 @@
 use nih_plug::nih_log;
 
 use crate::consts::MAX_VOICES;
-use crate::voice::Parameters;
 /// A container for multiple voices. Used to achieve polyphony.
-use crate::voice::Voice;
+use crate::voice_utils::{Parameters, Voice};
 
-pub struct VoiceGroup {
+pub struct VoiceGroup<T: Voice> {
     // TODO: Identify if using an active an inactive vec is the best approach
-    active_voices: Vec<Voice>,
-    inactive_voices: Vec<Voice>,
+    active_voices: Vec<Box<T>>,
+    inactive_voices: Vec<Box<T>>,
     voice_timings: Vec<i32>,
 }
 
-impl VoiceGroup {
+impl<T: Voice> VoiceGroup<T> {
     pub fn new() -> Self {
         let active_voices = Vec::with_capacity(MAX_VOICES);
         let inactive_voices = Vec::with_capacity(MAX_VOICES);
@@ -35,9 +34,9 @@ impl VoiceGroup {
         self.voice_timings.clear();
         assert!(num_voices <= MAX_VOICES, "num_voices must be <= MAX_VOICES");
         for _ in 0..MAX_VOICES {
-            let mut voice = Voice::new();
+            let mut voice = T::new();
             voice.initialize(num_channels, max_samples_per_channel);
-            self.inactive_voices.push(voice);
+            self.inactive_voices.push(Box::new(voice));
         }
         for _ in 0..num_voices {
             self.active_voices.push(
@@ -172,13 +171,14 @@ impl VoiceGroup {
 // setup tests
 #[cfg(test)]
 mod tests {
+    use crate::sin_voice::SinVoice;
     use approx::assert_relative_eq;
 
     use super::*;
 
     #[test]
     fn test_get_oldest_voice() {
-        let mut voice_group = VoiceGroup::new();
+        let mut voice_group: VoiceGroup<SinVoice> = VoiceGroup::new();
         voice_group.initialize(4, 2, 1024);
         voice_group.voice_timings = vec![0, 1, 2, 3];
         assert_eq!(voice_group.get_oldest_voice(), Some(3));
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_update_num_voices() {
-        let mut voice_group = VoiceGroup::new();
+        let mut voice_group: VoiceGroup<SinVoice> = VoiceGroup::new();
         voice_group.initialize(4, 2, 1024);
         voice_group.update_num_voices(6);
         assert_eq!(voice_group.active_voices.len(), 6);
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_render() {
-        let mut voice_group = VoiceGroup::new();
+        let mut voice_group: VoiceGroup<SinVoice> = VoiceGroup::new();
         voice_group.initialize(4, 2, 1024);
         let mut audio_buffer = vec![vec![0.0; 1024], vec![0.0; 1024]];
         let audio_buffer_slices: &mut [&mut [f32]] = &mut audio_buffer

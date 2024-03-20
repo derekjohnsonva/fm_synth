@@ -4,32 +4,12 @@ use crate::fm_core::FmCore;
 // A voice should contain an oscillator, an envelope, and a filter
 // The voice should handle note on and note off events. It needs a render function,
 // an initialize function, and an reset function.
-use crate::linear_eg::EGParameters;
 use crate::linear_eg::EnvelopeGenerator;
 use crate::linear_eg::LinearEG;
+use crate::voice_utils::{MidiEvent, Parameters, Voice};
 
-#[derive(Default)]
-pub struct Parameters {
-    pub eg_params: EGParameters,
-}
-/// This stores Midi information.
-#[derive(Debug, PartialEq, Clone)]
-pub struct MidiEvent {
-    timing: u32,
-    /// A unique identifier for this note, if available. Using this to refer to a note is
-    /// required when allowing overlapping voices for CLAP plugins.
-    voice_id: Option<i32>,
-    /// The note's channel, in `0..16`.
-    channel: u8,
-    /// The note's MIDI key number, in `0..128`.
-    note: u8,
-    /// The note's velocity, in `[0, 1]`. Some plugin APIs may allow higher precision than the
-    /// 128 levels available in MIDI.
-    velocity: f32,
-}
-
-#[derive(PartialEq, Clone, Debug)]
-pub struct Voice {
+#[derive(PartialEq, Clone)]
+pub struct SinVoice {
     core: FmCore,
     eg: LinearEG,
     // TODO: Add a filter
@@ -42,9 +22,21 @@ pub struct Voice {
                                   // TODO: Add gain
                                   // gain: Smoother<f32>,
 }
+// Write a debug implementation for Voice
+impl std::fmt::Debug for SinVoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Voice")
+            .field("eg", &self.eg)
+            .field("_id", &self._id)
+            .field("is_stealing", &self.is_stealing)
+            .field("current_midi_event", &self.current_midi_event)
+            .field("next_midi_event", &self.next_midi_event)
+            .finish()
+    }
+}
 
-impl Voice {
-    pub fn new() -> Self {
+impl Voice for SinVoice {
+    fn new() -> Self {
         Self {
             core: FmCore::new(),
             eg: LinearEG::new(),
@@ -56,12 +48,11 @@ impl Voice {
             // gain: Smoother::new(SmoothingStyle::Linear(1.0)),
         }
     }
-
-    pub fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {
+    fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {
         self.output_buffer = vec![vec![0.0; max_samples_per_channel]; num_channels];
     }
 
-    pub fn render(&mut self, num_samples_to_process: usize, params: &Parameters, sample_rate: f32) {
+    fn render(&mut self, num_samples_to_process: usize, params: &Parameters, sample_rate: f32) {
         // get the length of the audio buffer
         let eg_value = self
             .eg
@@ -71,7 +62,7 @@ impl Voice {
         for sample_index in 0..num_samples_to_process {
             let core_output = self.core.render();
             // add the core output to the different channels
-            for channel in &mut self.output_buffer {
+            for channel in self.output_buffer.iter_mut() {
                 channel[sample_index] = core_output * eg_value;
             }
         }
@@ -106,13 +97,13 @@ impl Voice {
             }
         }
     }
-    pub fn reset(&mut self, params: &Parameters) {
+    fn reset(&mut self, params: &Parameters) {
         self.core.reset();
         self.eg.reset(&params.eg_params);
     }
-    /// This function is called when a note on event is received. There should never be two calls to ``note_on`` without a
+    /// This function is called when a note on event is received. There should never be two calls to note_on without a
     /// call to render in between.
-    pub fn note_on(
+    fn note_on(
         &mut self,
         note: u8,
         velocity: f32,
@@ -154,7 +145,7 @@ impl Voice {
     /// 2) The note off event is related to the `current_midi_event`, but the voice is in the stealing state. We should ignore it.
     /// 3) The note off event is related to the `next_midi_event`, and the voice is in the stealing state. We should
     ///    finish the note steal but we should not process the note off event as the `note_on` event has not been processed yet.
-    pub fn note_off(
+    fn note_off(
         &mut self,
         voice_id: Option<i32>,
         channel: u8,
@@ -182,11 +173,11 @@ impl Voice {
             }
         }
     }
-    pub fn is_playing(&self) -> bool {
+    fn is_playing(&self) -> bool {
         self.eg.is_playing()
     }
 
-    pub fn accumulate_output(
+    fn accumulate_output(
         &mut self,
         audio_buffer: &mut [&mut [f32]],
         block_start: usize,
@@ -201,16 +192,16 @@ impl Voice {
 }
 
 #[cfg(test)]
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 mod tests {
     use super::*;
     use crate::consts::SHUTDOWN_TIME_MSEC;
+    use crate::linear_eg::EGParameters;
     use approx::assert_relative_eq;
     use rstest::{fixture, rstest};
 
     #[fixture]
-    fn voice() -> Voice {
-        Voice::new()
+    fn voice() -> SinVoice {
+        SinVoice::new()
     }
     #[fixture]
     fn params() -> Parameters {
@@ -226,16 +217,14 @@ mod tests {
     }
 
     #[rstest]
-    fn test_voice_stealing(mut voice: Voice, params: Parameters) {
+    fn test_voice_stealing(mut voice: SinVoice, params: Parameters) {
         // Do a note on
         const SAMPLES_RATE: f32 = 44100.0;
-        const NUM_SAMPLES_TO_PROCESS_2: usize =
-            (SAMPLES_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         let note_1 = 60;
         voice.initialize(2, 1024);
         voice.note_on(note_1, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         // Assert that we are not in the stealing state
-        assert!(!voice.is_stealing);
+        assert_eq!(voice.is_stealing, false);
         // render a couple of samples so that the envelope is in the attack phase and there is a non-zero output
         let audio_buffer = &mut [0.0; 10];
         voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
@@ -243,41 +232,36 @@ mod tests {
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         // Assert that we are in the stealing state
-        assert!(voice.is_stealing);
+        assert_eq!(voice.is_stealing, true);
         // Find how many samples it takes to escape the stealing state
+        const NUM_SAMPLES_TO_PROCESS_2: usize =
+            (SAMPLES_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         // render one less sample than it takes to escape the stealing state
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS_2];
         voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Assert that we are in the stealing state
-        assert!(voice.is_stealing);
+        assert_eq!(voice.is_stealing, true);
         // render enough samples to escape the stealing state
         let audio_buffer = &mut [0.0; 1];
         voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Assert that we are not in the stealing state
-        assert!(!voice.is_stealing);
+        assert_eq!(voice.is_stealing, false);
         // Assert that the current midi event is the second note on
-        assert_eq!(
-            voice
-                .current_midi_event
-                .expect("Expected current midi event")
-                .note,
-            note_2
-        );
+        assert_eq!(voice.current_midi_event.unwrap().note, note_2);
         // Assert that the next midi event is None
         assert_eq!(voice.next_midi_event, None);
     }
 
     /// Test what happens when a new note on event is received while the voice is in the stealing state
     #[rstest]
-    fn test_note_on_during_steal(mut voice: Voice, params: Parameters) {
+    fn test_note_on_during_steal(mut voice: SinVoice, params: Parameters) {
         // Do a note on
         const SAMPLE_RATE: f32 = 44100.0;
-        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         let note_1 = 60;
         voice.initialize(2, 1024);
         voice.note_on(note_1, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are not in the stealing state
-        assert!(!voice.is_stealing);
+        assert_eq!(voice.is_stealing, false);
         // render a couple of samples so that the envelope is in the attack phase and there is a non-zero output
         let audio_buffer = &mut [0.0; 10];
         voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
@@ -285,31 +269,27 @@ mod tests {
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are in the stealing state
-        assert!(voice.is_stealing);
+        assert_eq!(voice.is_stealing, true);
         // Do another note on
         let note_3 = 62;
         voice.note_on(note_3, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are in the stealing state
-        assert!(voice.is_stealing);
+        assert_eq!(voice.is_stealing, true);
         // Find how many samples it takes to escape the stealing state
+        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         // render one less sample than it takes to escape the stealing state
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS + 1];
         voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         // Assert that we are not in the stealing state
-        assert!(!voice.is_stealing);
+        assert_eq!(voice.is_stealing, false);
         // Assert that the current midi event is the third note on
-        assert_eq!(
-            voice
-                .current_midi_event
-                .expect("Expected current midi event")
-                .note,
-            note_3
-        );
+        assert_eq!(voice.current_midi_event.unwrap().note, note_3);
         // Assert that the next midi
     }
 
-    #[rstest]
+    #[test]
     fn test_note_on_and_off() {
+        let mut voice = SinVoice::new();
         const PARAMS: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
@@ -322,31 +302,30 @@ mod tests {
         const SAMPLE_RATE: f32 = 44100.0;
         const NUM_SAMPLES_TO_PROCESS: usize =
             (SAMPLE_RATE * PARAMS.eg_params.release_time_msec / 1000.0) as usize;
-        let mut voice = Voice::new();
         let note = 60;
         voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
         voice.note_on(note, 0.5, Some(1), 0, &PARAMS, SAMPLE_RATE);
         let audio_buffer = &mut [0.0; 10];
         voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         voice.note_off(Some(1), 0, note, &PARAMS, SAMPLE_RATE);
-        assert!(voice.eg.is_playing());
+        assert_eq!(voice.eg.is_playing(), true);
         // find the number of samples it takes to reach the off phase
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
 
         voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
-        assert!(!voice.eg.is_playing());
+        assert!(voice.eg.is_playing() == false);
         assert_relative_eq!(voice.eg.render(&PARAMS.eg_params, 1, SAMPLE_RATE), 0.0);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
         voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         // assert that the audio buffer is zero
-        for sample in audio_buffer {
+        audio_buffer.into_iter().for_each(|sample| {
             assert_relative_eq!(*sample, 0.0);
-        }
+        });
     }
 
     // Write a test to assert that when we play a note on immediately after a note off, we enter the steal state
     #[rstest]
-    fn test_note_on_after_note_off(mut voice: Voice) {
+    fn test_note_on_after_note_off(mut voice: SinVoice) {
         const PARAMS: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
@@ -374,7 +353,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_note_off_guard(mut voice: Voice, params: Parameters) {
+    fn test_note_off_guard(mut voice: SinVoice, params: Parameters) {
         const SAMPLE_RATE: f32 = 1000.0;
         const ATTACK_TIME_MS: f32 = 10.0;
         const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * ATTACK_TIME_MS / 1000.0) as usize;
