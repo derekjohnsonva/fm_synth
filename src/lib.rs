@@ -130,6 +130,7 @@ impl Default for FmSynthParams {
                 4,
                 IntRange::Linear {
                     min: 1,
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
                     max: consts::MAX_VOICES as i32,
                 },
             ),
@@ -192,8 +193,7 @@ impl Plugin for FmSynth {
         // get the number of output channels
         let num_channels = audio_io_layout
             .main_output_channels
-            .map(NonZeroU32::get)
-            .unwrap_or(2);
+            .map_or(2, NonZeroU32::get);
         self.voices.initialize(
             4,
             num_channels as usize,
@@ -221,6 +221,7 @@ impl Plugin for FmSynth {
         // hand.
 
         let num_samples = buffer.samples();
+        #[allow(clippy::cast_sign_loss)]
         self.voices.update_num_voices(
             self.params
                 .num_voices

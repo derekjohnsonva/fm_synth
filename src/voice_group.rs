@@ -18,7 +18,7 @@ impl VoiceGroup {
         let inactive_voices = Vec::with_capacity(MAX_VOICES);
         let voice_timings = Vec::with_capacity(MAX_VOICES);
 
-        VoiceGroup {
+        Self {
             active_voices,
             inactive_voices,
             voice_timings,
@@ -40,7 +40,11 @@ impl VoiceGroup {
             self.inactive_voices.push(voice);
         }
         for _ in 0..num_voices {
-            self.active_voices.push(self.inactive_voices.pop().unwrap());
+            self.active_voices.push(
+                self.inactive_voices
+                    .pop()
+                    .expect("No inactive voices available"),
+            );
             self.voice_timings.push(0);
         }
     }
@@ -61,8 +65,8 @@ impl VoiceGroup {
             voice.render(block_size, params, sample_rate);
         }
         // Accumulate the outputs from all voices
-        for voice in self.active_voices.iter_mut() {
-            voice.accumulate_output(audio_buffer, block_start, block_end)
+        for voice in &mut self.active_voices {
+            voice.accumulate_output(audio_buffer, block_start, block_end);
         }
     }
     pub fn reset(&mut self, params: &Parameters) {
@@ -113,7 +117,7 @@ impl VoiceGroup {
         params: &Parameters,
         sample_rate: f32,
     ) {
-        for voice in self.active_voices.iter_mut() {
+        for voice in &mut self.active_voices {
             voice.note_off(voice_id, channel, note, params, sample_rate);
         }
     }
@@ -126,7 +130,11 @@ impl VoiceGroup {
         assert!(new_num_voices > 0, "new_num_voices must be > 0");
         if new_num_voices > self.active_voices.len() {
             for _ in 0..new_num_voices - self.active_voices.len() {
-                self.active_voices.push(self.inactive_voices.pop().unwrap());
+                self.active_voices.push(
+                    self.inactive_voices
+                        .pop()
+                        .expect("No inactive voices available"),
+                );
                 self.voice_timings.push(0);
             }
         } else {
@@ -164,6 +172,8 @@ impl VoiceGroup {
 // setup tests
 #[cfg(test)]
 mod tests {
+    use approx::assert_relative_eq;
+
     use super::*;
 
     #[test]
@@ -203,11 +213,11 @@ mod tests {
         let mut audio_buffer = vec![vec![0.0; 1024], vec![0.0; 1024]];
         let audio_buffer_slices: &mut [&mut [f32]] = &mut audio_buffer
             .iter_mut()
-            .map(|v| v.as_mut_slice())
+            .map(Vec::as_mut_slice)
             .collect::<Vec<_>>();
         let params = Parameters::default();
         voice_group.render(audio_buffer_slices, &params, 44100.0, 0, 1024);
-        assert_eq!(audio_buffer_slices[0][0], 0.0);
-        assert_eq!(audio_buffer_slices[1][0], 0.0);
+        assert_relative_eq!(audio_buffer_slices[0][0], 0.0);
+        assert_relative_eq!(audio_buffer_slices[1][0], 0.0);
     }
 }
