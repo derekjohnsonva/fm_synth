@@ -8,7 +8,7 @@ use crate::linear_eg::EnvelopeGenerator;
 use crate::linear_eg::LinearEG;
 use crate::voice_utils::{MidiEvent, Parameters, Voice};
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct SinVoice {
     core: FmCore,
     eg: LinearEG,
@@ -21,18 +21,6 @@ pub struct SinVoice {
     output_buffer: Vec<Vec<f32>>, // 2D output buffer for stereo
                                   // TODO: Add gain
                                   // gain: Smoother<f32>,
-}
-// Write a debug implementation for Voice
-impl std::fmt::Debug for SinVoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Voice")
-            .field("eg", &self.eg)
-            .field("_id", &self._id)
-            .field("is_stealing", &self.is_stealing)
-            .field("current_midi_event", &self.current_midi_event)
-            .field("next_midi_event", &self.next_midi_event)
-            .finish()
-    }
 }
 
 impl Voice for SinVoice {
@@ -62,7 +50,7 @@ impl Voice for SinVoice {
         for sample_index in 0..num_samples_to_process {
             let core_output = self.core.render();
             // add the core output to the different channels
-            for channel in self.output_buffer.iter_mut() {
+            for channel in &mut self.output_buffer {
                 channel[sample_index] = core_output * eg_value;
             }
         }
@@ -101,7 +89,7 @@ impl Voice for SinVoice {
         self.core.reset();
         self.eg.reset(&params.eg_params);
     }
-    /// This function is called when a note on event is received. There should never be two calls to note_on without a
+    /// This function is called when a note on event is received. There should never be two calls to ``note_on`` without a
     /// call to render in between.
     fn note_on(
         &mut self,
@@ -192,6 +180,7 @@ impl Voice for SinVoice {
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 mod tests {
     use super::*;
     use crate::consts::SHUTDOWN_TIME_MSEC;
@@ -220,11 +209,15 @@ mod tests {
     fn test_voice_stealing(mut voice: SinVoice, params: Parameters) {
         // Do a note on
         const SAMPLES_RATE: f32 = 44100.0;
+        #[allow(clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_sign_loss)]
+        const NUM_SAMPLES_TO_PROCESS_2: usize =
+            (SAMPLES_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         let note_1 = 60;
         voice.initialize(2, 1024);
         voice.note_on(note_1, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         // Assert that we are not in the stealing state
-        assert_eq!(voice.is_stealing, false);
+        assert!(!voice.is_stealing);
         // render a couple of samples so that the envelope is in the attack phase and there is a non-zero output
         let audio_buffer = &mut [0.0; 10];
         voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
@@ -232,22 +225,26 @@ mod tests {
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         // Assert that we are in the stealing state
-        assert_eq!(voice.is_stealing, true);
+        assert!(voice.is_stealing);
         // Find how many samples it takes to escape the stealing state
-        const NUM_SAMPLES_TO_PROCESS_2: usize =
-            (SAMPLES_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         // render one less sample than it takes to escape the stealing state
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS_2];
         voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Assert that we are in the stealing state
-        assert_eq!(voice.is_stealing, true);
+        assert!(voice.is_stealing);
         // render enough samples to escape the stealing state
         let audio_buffer = &mut [0.0; 1];
         voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         // Assert that we are not in the stealing state
-        assert_eq!(voice.is_stealing, false);
+        assert!(!voice.is_stealing);
         // Assert that the current midi event is the second note on
-        assert_eq!(voice.current_midi_event.unwrap().note, note_2);
+        assert_eq!(
+            voice
+                .current_midi_event
+                .expect("Expected current midi event")
+                .note,
+            note_2
+        );
         // Assert that the next midi event is None
         assert_eq!(voice.next_midi_event, None);
     }
@@ -257,11 +254,12 @@ mod tests {
     fn test_note_on_during_steal(mut voice: SinVoice, params: Parameters) {
         // Do a note on
         const SAMPLE_RATE: f32 = 44100.0;
+        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         let note_1 = 60;
         voice.initialize(2, 1024);
         voice.note_on(note_1, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are not in the stealing state
-        assert_eq!(voice.is_stealing, false);
+        assert!(!voice.is_stealing);
         // render a couple of samples so that the envelope is in the attack phase and there is a non-zero output
         let audio_buffer = &mut [0.0; 10];
         voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
@@ -269,27 +267,31 @@ mod tests {
         let note_2 = 61;
         voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are in the stealing state
-        assert_eq!(voice.is_stealing, true);
+        assert!(voice.is_stealing);
         // Do another note on
         let note_3 = 62;
         voice.note_on(note_3, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         // Assert that we are in the stealing state
-        assert_eq!(voice.is_stealing, true);
+        assert!(voice.is_stealing);
         // Find how many samples it takes to escape the stealing state
-        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * SHUTDOWN_TIME_MSEC / 1000.0) as usize;
         // render one less sample than it takes to escape the stealing state
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS + 1];
         voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         // Assert that we are not in the stealing state
-        assert_eq!(voice.is_stealing, false);
+        assert!(!voice.is_stealing);
         // Assert that the current midi event is the third note on
-        assert_eq!(voice.current_midi_event.unwrap().note, note_3);
+        assert_eq!(
+            voice
+                .current_midi_event
+                .expect("Expected current midi event")
+                .note,
+            note_3
+        );
         // Assert that the next midi
     }
 
     #[test]
     fn test_note_on_and_off() {
-        let mut voice = SinVoice::new();
         const PARAMS: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
@@ -302,25 +304,26 @@ mod tests {
         const SAMPLE_RATE: f32 = 44100.0;
         const NUM_SAMPLES_TO_PROCESS: usize =
             (SAMPLE_RATE * PARAMS.eg_params.release_time_msec / 1000.0) as usize;
+        let mut voice = SinVoice::new();
         let note = 60;
         voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
         voice.note_on(note, 0.5, Some(1), 0, &PARAMS, SAMPLE_RATE);
         let audio_buffer = &mut [0.0; 10];
         voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         voice.note_off(Some(1), 0, note, &PARAMS, SAMPLE_RATE);
-        assert_eq!(voice.eg.is_playing(), true);
+        assert!(voice.eg.is_playing());
         // find the number of samples it takes to reach the off phase
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
 
         voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
-        assert!(voice.eg.is_playing() == false);
+        assert!(!voice.eg.is_playing());
         assert_relative_eq!(voice.eg.render(&PARAMS.eg_params, 1, SAMPLE_RATE), 0.0);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
         voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
         // assert that the audio buffer is zero
-        audio_buffer.into_iter().for_each(|sample| {
+        for sample in audio_buffer {
             assert_relative_eq!(*sample, 0.0);
-        });
+        }
     }
 
     // Write a test to assert that when we play a note on immediately after a note off, we enter the steal state
