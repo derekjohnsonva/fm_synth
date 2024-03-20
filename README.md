@@ -22,5 +22,4 @@ fn main() {
 
 ## TODO:
 
-- Make Polyphony
 - Add FM operations
