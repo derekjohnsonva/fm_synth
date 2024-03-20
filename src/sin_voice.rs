@@ -48,7 +48,7 @@ impl Voice for SinVoice {
 
         // add the core output to the audio_buffer
         for sample_index in 0..num_samples_to_process {
-            let core_output = self.core.render();
+            let core_output = self.core.render(sample_rate);
             // add the core output to the different channels
             for channel in &mut self.output_buffer {
                 channel[sample_index] = core_output * eg_value;
@@ -100,8 +100,6 @@ impl Voice for SinVoice {
         params: &Parameters,
         sample_rate: f32,
     ) {
-        // print "note on" plus the note number
-        nih_log!("Note on; note = {}", note);
         // Check to see if the voice is already playing a note. If so, we need to steal the voice.
         if self.eg.is_playing() {
             nih_log!("Stealing");
@@ -183,8 +181,8 @@ impl Voice for SinVoice {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 mod tests {
     use super::*;
-    use crate::consts::SHUTDOWN_TIME_MSEC;
     use crate::linear_eg::EGParameters;
+    use crate::{consts::SHUTDOWN_TIME_MSEC, voice_utils::FmParams};
     use approx::assert_relative_eq;
     use rstest::{fixture, rstest};
 
@@ -202,6 +200,7 @@ mod tests {
                 start_level: 0.0,
                 sustain_level: 0.1,
             },
+            ..Default::default()
         }
     }
 
@@ -300,6 +299,10 @@ mod tests {
                 start_level: 0.0,
                 sustain_level: 0.1,
             },
+            fm_params: FmParams {
+                ratio: 1.0,
+                index: 1.0,
+            },
         };
         const SAMPLE_RATE: f32 = 44100.0;
         const NUM_SAMPLES_TO_PROCESS: usize =
@@ -336,6 +339,10 @@ mod tests {
                 release_time_msec: 10.0,
                 start_level: 0.0,
                 sustain_level: 0.1,
+            },
+            fm_params: FmParams {
+                ratio: 1.0,
+                index: 1.0,
             },
         };
         const SAMPLES_RATE: f32 = 1000.0;

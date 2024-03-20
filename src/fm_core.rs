@@ -6,6 +6,7 @@ use nih_plug::util;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FmCore {
+    // TODO: Remove pub from these fields
     midi_note: u8,
     pub note_velocity: f32, // amplitude in dB
     output_value: f32,      // The last output value. This is used for self Feedback
@@ -16,6 +17,8 @@ pub struct FmCore {
     midi_channel: u8,
     // -- Timebase
     pub clock: Clock,
+    // -- For PM/FM
+    pub ratio: f32,
 }
 
 impl FmCore {
@@ -29,6 +32,7 @@ impl FmCore {
             voice_id: None,
             midi_channel: 0,
             clock: Clock::new(),
+            ratio: 1.0,
         }
     }
     pub fn reset(&mut self) {
@@ -37,7 +41,11 @@ impl FmCore {
         self.clock.reset();
     }
 
-    pub fn render(&mut self) -> f32 {
+    pub fn render(&mut self, sample_rate: f32) -> f32 {
+        // convert the midi note to a frequency
+        let frequency = util::midi_note_to_freq(self.midi_note);
+        // set the frequency of the oscillator
+        self.clock.set_freq(frequency * self.ratio, sample_rate);
         self.output_value = self.sin_osc.read_osc(self.clock.mcounter);
         self.output_value *= self.note_velocity * self.velocity_scale;
         self.clock.advance_wrap_clock(1.0);
@@ -48,14 +56,10 @@ impl FmCore {
         &mut self,
         note: u8,
         velocity: f32,
-        sample_rate: f32,
+        _sample_rate: f32,
         voice_id: Option<i32>,
         midi_channel: u8,
     ) {
-        // convert the midi note to a frequency
-        let frequency = util::midi_note_to_freq(note);
-        // set the frequency of the oscillator
-        self.clock.set_freq(frequency, sample_rate);
         self.note_velocity = velocity;
         self.midi_note = note;
         self.voice_id = voice_id;
@@ -84,15 +88,15 @@ mod tests {
         // We will set the output amplitude to 1.0, so we can compare the output to the sine wave
         fm_core.note_velocity = 1.0;
         // Now we can render the sound
-        let output = fm_core.render();
+        let output = fm_core.render(sample_rate);
         assert_relative_eq!(output, 0.0);
-        let output_2 = fm_core.render();
+        let output_2 = fm_core.render(sample_rate);
         assert_relative_eq!(output_2, 1.0);
-        let output_3 = fm_core.render();
+        let output_3 = fm_core.render(sample_rate);
         assert_relative_eq!(output_3, 0.0);
-        let output_4 = fm_core.render();
+        let output_4 = fm_core.render(sample_rate);
         assert_relative_eq!(output_4, -1.0);
-        let output_5 = fm_core.render();
+        let output_5 = fm_core.render(sample_rate);
         assert_relative_eq!(output_5, 0.0);
     }
 }

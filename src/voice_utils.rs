@@ -1,8 +1,14 @@
 use crate::linear_eg::EGParameters;
+#[derive(Default)]
+pub struct FmParams {
+    pub ratio: f32, // This is the ratio of the carrier frequency to the modulator frequency.
+    pub index: f32, // This is the value that we multiply the output of the modulator by.
+}
 
 #[derive(Default)]
 pub struct Parameters {
     pub eg_params: EGParameters,
+    pub fm_params: FmParams,
 }
 /// This stores Midi information.
 #[derive(Debug, PartialEq, Clone)]

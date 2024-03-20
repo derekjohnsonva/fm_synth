@@ -1,11 +1,11 @@
 use nih_plug::prelude::*;
-use sin_voice::SinVoice;
 
 use std::sync::Arc;
 
 mod clock;
 mod consts;
 mod fm_core;
+mod fm_voice;
 mod linear_eg;
 mod sin_osc;
 mod sin_voice;
@@ -19,7 +19,7 @@ const MAX_BLOCK_SIZE: usize = 64;
 pub struct FmSynth {
     params: Arc<FmSynthParams>,
     // used to store the state of one fm operator
-    voices: voice_group::VoiceGroup<SinVoice>,
+    voices: voice_group::VoiceGroup<fm_voice::FmVoice>,
     voice_params: voice_utils::Parameters,
     sample_rate: f32,
 }
@@ -34,6 +34,8 @@ struct FmSynthParams {
     pub gain: FloatParam,
     #[id = "modulation_index"]
     pub modulation_index: FloatParam,
+    #[id = "ratio"]
+    pub ratio: FloatParam,
     #[id = "attack_time"]
     pub attack_time: FloatParam,
     // TODO: Make it so that if decay time is less that a certain value, sustain level is not used.
@@ -93,6 +95,15 @@ impl Default for FmSynthParams {
                     max: 10.0,
                 },
             ),
+            ratio: FloatParam::new(
+                "Ratio",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+
             attack_time: FloatParam::new(
                 "Attack Time",
                 10.0,
@@ -310,6 +321,18 @@ impl Plugin for FmSynth {
                 sustain_level: self
                     .params
                     .sustain_level
+                    .smoothed
+                    .next_step(num_samples_to_process_u32),
+            };
+            self.voice_params.fm_params = voice_utils::FmParams {
+                ratio: self
+                    .params
+                    .ratio
+                    .smoothed
+                    .next_step(num_samples_to_process_u32),
+                index: self
+                    .params
+                    .modulation_index
                     .smoothed
                     .next_step(num_samples_to_process_u32),
             };

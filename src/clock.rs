@@ -115,6 +115,15 @@ impl Clock {
             self.wrap_clock();
         }
     }
+
+    // For phase Modulation. Removes the current phase offset from the clock.
+    pub fn remove_phase_offset(&mut self) {
+        if self.phase_inc > 0.0 {
+            self.mcounter -= self.phase_offset;
+        } else {
+            self.mcounter += self.phase_offset;
+        }
+    }
 }
 
 #[cfg(test)]
