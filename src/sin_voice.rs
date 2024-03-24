@@ -181,8 +181,8 @@ impl Voice for SinVoice {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 mod tests {
     use super::*;
+    use crate::consts::SHUTDOWN_TIME_MSEC;
     use crate::linear_eg::EGParameters;
-    use crate::{consts::SHUTDOWN_TIME_MSEC, voice_utils::FmParams};
     use approx::assert_relative_eq;
     use rstest::{fixture, rstest};
 
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_note_on_and_off() {
-        const PARAMS: Parameters = Parameters {
+        let params: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
                 decay_time_msec: 10.0,
@@ -299,30 +299,27 @@ mod tests {
                 start_level: 0.0,
                 sustain_level: 0.1,
             },
-            fm_params: FmParams {
-                ratio: 1.0,
-                index: 1.0,
-            },
+            ..Default::default()
         };
         const SAMPLE_RATE: f32 = 44100.0;
-        const NUM_SAMPLES_TO_PROCESS: usize =
-            (SAMPLE_RATE * PARAMS.eg_params.release_time_msec / 1000.0) as usize;
+        const RELEASE_TIME_MS: f32 = 10.0;
+        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * RELEASE_TIME_MS / 1000.0) as usize;
         let mut voice = SinVoice::new();
         let note = 60;
         voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
-        voice.note_on(note, 0.5, Some(1), 0, &PARAMS, SAMPLE_RATE);
+        voice.note_on(note, 0.5, Some(1), 0, &params, SAMPLE_RATE);
         let audio_buffer = &mut [0.0; 10];
-        voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
-        voice.note_off(Some(1), 0, note, &PARAMS, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
+        voice.note_off(Some(1), 0, note, &params, SAMPLE_RATE);
         assert!(voice.eg.is_playing());
         // find the number of samples it takes to reach the off phase
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
 
-        voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         assert!(!voice.eg.is_playing());
-        assert_relative_eq!(voice.eg.render(&PARAMS.eg_params, 1, SAMPLE_RATE), 0.0);
+        assert_relative_eq!(voice.eg.render(&params.eg_params, 1, SAMPLE_RATE), 0.0);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
-        voice.render(audio_buffer.len(), &PARAMS, SAMPLE_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLE_RATE);
         // assert that the audio buffer is zero
         for sample in audio_buffer {
             assert_relative_eq!(*sample, 0.0);
@@ -332,7 +329,7 @@ mod tests {
     // Write a test to assert that when we play a note on immediately after a note off, we enter the steal state
     #[rstest]
     fn test_note_on_after_note_off(mut voice: SinVoice) {
-        const PARAMS: Parameters = Parameters {
+        let params: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
                 decay_time_msec: 10.0,
@@ -340,25 +337,22 @@ mod tests {
                 start_level: 0.0,
                 sustain_level: 0.1,
             },
-            fm_params: FmParams {
-                ratio: 1.0,
-                index: 1.0,
-            },
+            ..Default::default()
         };
         const SAMPLES_RATE: f32 = 1000.0;
-        const NUM_SAMPLES_TO_PROCESS: usize =
-            (SAMPLES_RATE * PARAMS.eg_params.attack_time_msec / 1000.0) as usize;
+        const ATTACK_TIME_MS: f32 = 10.0;
+        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLES_RATE * ATTACK_TIME_MS / 1000.0) as usize;
         let note = 60;
         voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
-        voice.note_on(note, 0.5, Some(1), 0, &PARAMS, SAMPLES_RATE);
+        voice.note_on(note, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         let audio_buffer = &mut [0.0; NUM_SAMPLES_TO_PROCESS];
-        voice.render(audio_buffer.len(), &PARAMS, SAMPLES_RATE);
-        voice.note_off(Some(1), 0, note, &PARAMS, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
+        voice.note_off(Some(1), 0, note, &params, SAMPLES_RATE);
         // We are at the end of the attack phase
         let audio_buffer = &mut [0.0; 1];
-        voice.render(audio_buffer.len(), &PARAMS, SAMPLES_RATE);
+        voice.render(audio_buffer.len(), &params, SAMPLES_RATE);
         let note_2 = 61;
-        voice.note_on(note_2, 0.5, Some(1), 0, &PARAMS, SAMPLES_RATE);
+        voice.note_on(note_2, 0.5, Some(1), 0, &params, SAMPLES_RATE);
         assert!(voice.is_stealing);
     }
 

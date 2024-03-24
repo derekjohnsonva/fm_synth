@@ -1,8 +1,22 @@
 use crate::linear_eg::EGParameters;
 #[derive(Default)]
+/// Ratio is the ratio of the carrier frequency to the modulator frequency.
+/// Index is the value that we multiply the output of the modulator by.
 pub struct FmParams {
-    pub ratio: f32, // This is the ratio of the carrier frequency to the modulator frequency.
-    pub index: f32, // This is the value that we multiply the output of the modulator by.
+    pub op_a_ratio: f32,
+    pub op_b_ratio: f32,
+    pub op_c_ratio: f32,
+    pub op_d_ratio: f32,
+
+    pub op_a_index: f32,
+    pub op_b_index: f32,
+    pub op_c_index: f32,
+    pub op_d_index: f32,
+    /// How much of the output of each operator is mixed into the output of the voice.
+    pub op_a_mix: f32,
+    pub op_b_mix: f32,
+    pub op_c_mix: f32,
+    pub op_d_mix: f32,
 }
 
 #[derive(Default)]

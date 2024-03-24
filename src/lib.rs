@@ -33,10 +33,6 @@ struct FmSynthParams {
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
     #[id = "gain"]
     pub gain: FloatParam,
-    #[id = "modulation_index"]
-    pub modulation_index: FloatParam,
-    #[id = "ratio"]
-    pub ratio: FloatParam,
     #[id = "attack_time"]
     pub attack_time: FloatParam,
     // TODO: Make it so that if decay time is less that a certain value, sustain level is not used.
@@ -48,6 +44,33 @@ struct FmSynthParams {
     pub release_time: FloatParam,
     #[id = "num_voices"]
     pub num_voices: IntParam,
+    // idex
+    #[id = "operator_a_index"]
+    pub operator_a_index: FloatParam,
+    #[id = "operator_b_index"]
+    pub operator_b_index: FloatParam,
+    #[id = "operator_c_index"]
+    pub operator_c_index: FloatParam,
+    #[id = "operator_d_index"]
+    pub operator_d_index: FloatParam,
+    // ratio
+    #[id = "operator_a_ratio"]
+    pub operator_a_ratio: FloatParam,
+    #[id = "operator_b_ratio"]
+    pub operator_b_ratio: FloatParam,
+    #[id = "operator_c_ratio"]
+    pub operator_c_ratio: FloatParam,
+    #[id = "operator_d_ratio"]
+    pub operator_d_ratio: FloatParam,
+    // mix
+    #[id = "operator_a_mix"]
+    pub operator_a_mix: FloatParam,
+    #[id = "operator_b_mix"]
+    pub operator_b_mix: FloatParam,
+    #[id = "operator_c_mix"]
+    pub operator_c_mix: FloatParam,
+    #[id = "operator_d_mix"]
+    pub operator_d_mix: FloatParam,
 }
 
 impl Default for FmSynth {
@@ -88,21 +111,90 @@ impl Default for FmSynthParams {
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
 
-            modulation_index: FloatParam::new(
-                "Modulation Index",
+            operator_a_index: FloatParam::new(
+                "Operator A Index",
                 0.0,
                 FloatRange::Linear {
                     min: 0.0,
                     max: 10.0,
                 },
             ),
-            ratio: FloatParam::new(
-                "Ratio",
+            operator_b_index: FloatParam::new(
+                "Operator B Index",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+            operator_c_index: FloatParam::new(
+                "Operator C Index",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+            operator_d_index: FloatParam::new(
+                "Operator D Index",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+            operator_a_ratio: FloatParam::new(
+                "Operator A ratio",
                 1.0,
                 FloatRange::Linear {
                     min: 0.0,
                     max: 10.0,
                 },
+            ),
+            operator_b_ratio: FloatParam::new(
+                "Operator B ratio",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+            operator_c_ratio: FloatParam::new(
+                "Operator C ratio",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+            operator_d_ratio: FloatParam::new(
+                "Operator D ratio",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            ),
+
+            operator_a_mix: FloatParam::new(
+                "Operator A Mix",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            operator_b_mix: FloatParam::new(
+                "Operator B Mix",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            operator_c_mix: FloatParam::new(
+                "Operator C Mix",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            operator_d_mix: FloatParam::new(
+                "Operator D Mix",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
 
             attack_time: FloatParam::new(
@@ -302,41 +394,7 @@ impl Plugin for FmSynth {
 
             let num_samples_to_process = block_end.checked_sub(block_start);
             let num_samples_to_process_u32 = num_samples_to_process.unwrap_or(0) as u32;
-            self.voice_params.eg_params = linear_eg::EGParameters {
-                attack_time_msec: self
-                    .params
-                    .attack_time
-                    .smoothed
-                    .next_step(num_samples_to_process_u32),
-                decay_time_msec: self
-                    .params
-                    .decay_time
-                    .smoothed
-                    .next_step(num_samples_to_process_u32),
-                release_time_msec: self
-                    .params
-                    .release_time
-                    .smoothed
-                    .next_step(num_samples_to_process_u32),
-                start_level: 0.0,
-                sustain_level: self
-                    .params
-                    .sustain_level
-                    .smoothed
-                    .next_step(num_samples_to_process_u32),
-            };
-            self.voice_params.fm_params = voice_utils::FmParams {
-                ratio: self
-                    .params
-                    .ratio
-                    .smoothed
-                    .next_step(num_samples_to_process_u32),
-                index: self
-                    .params
-                    .modulation_index
-                    .smoothed
-                    .next_step(num_samples_to_process_u32),
-            };
+            self.set_parameters(num_samples_to_process_u32);
             self.voices.render(
                 output,
                 &self.voice_params,
@@ -350,6 +408,96 @@ impl Plugin for FmSynth {
         }
 
         ProcessStatus::KeepAlive
+    }
+}
+
+impl FmSynth {
+    fn set_parameters(&mut self, num_samples_to_process_u32: u32) {
+        self.voice_params.eg_params = linear_eg::EGParameters {
+            attack_time_msec: self
+                .params
+                .attack_time
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            decay_time_msec: self
+                .params
+                .decay_time
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            release_time_msec: self
+                .params
+                .release_time
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            start_level: 0.0,
+            sustain_level: self
+                .params
+                .sustain_level
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+        };
+        self.voice_params.fm_params = voice_utils::FmParams {
+            op_a_ratio: self
+                .params
+                .operator_a_ratio
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_b_ratio: self
+                .params
+                .operator_b_ratio
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_c_ratio: self
+                .params
+                .operator_c_ratio
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_d_ratio: self
+                .params
+                .operator_d_ratio
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_a_index: self
+                .params
+                .operator_a_index
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_b_index: self
+                .params
+                .operator_b_index
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_c_index: self
+                .params
+                .operator_c_index
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_d_index: self
+                .params
+                .operator_d_index
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_a_mix: self
+                .params
+                .operator_a_mix
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_b_mix: self
+                .params
+                .operator_b_mix
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_c_mix: self
+                .params
+                .operator_c_mix
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+            op_d_mix: self
+                .params
+                .operator_d_mix
+                .smoothed
+                .next_step(num_samples_to_process_u32),
+        };
     }
 }
 

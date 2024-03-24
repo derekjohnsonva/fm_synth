@@ -42,9 +42,10 @@ impl Operator {
     pub fn render(
         &mut self,
         num_samples_to_process: usize,
-        params: &crate::voice_utils::Parameters,
+        _params: &crate::voice_utils::Parameters,
         sample_rate: f32,
         self_modulation: bool,
+        index: f32,
     ) {
         // add the output of core to the phase modulation buffer
         for sample_index in 0..num_samples_to_process {
@@ -57,7 +58,7 @@ impl Operator {
             // modulate the phase by the pm_input
             self.core
                 .clock
-                .add_phase_offset(self.pm_input[sample_index] * params.fm_params.index, true);
+                .add_phase_offset(self.pm_input[sample_index] * index, true);
             let core_output = self.core.render(sample_rate);
             self.core.clock.remove_phase_offset();
             self.last_output = core_output;

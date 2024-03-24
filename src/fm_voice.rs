@@ -11,6 +11,8 @@ use crate::{
 pub struct FmVoice {
     operator_a: Operator,
     operator_b: Operator,
+    operator_c: Operator,
+    operator_d: Operator,
     eg: LinearEG,
     // TODO: Add a filter
     _id: Option<i32>,
@@ -26,6 +28,9 @@ impl Voice for FmVoice {
         Self {
             operator_a: Operator::new(),
             operator_b: Operator::new(),
+            operator_c: Operator::new(),
+            operator_d: Operator::new(),
+
             eg: LinearEG::new(),
             _id: None,
             is_stealing: false,
@@ -36,10 +41,14 @@ impl Voice for FmVoice {
     }
 
     fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {
-        self.operator_a
-            .initialize(num_channels, max_samples_per_channel);
-        self.operator_b
-            .initialize(num_channels, max_samples_per_channel);
+        for operator in [
+            &mut self.operator_a,
+            &mut self.operator_b,
+            &mut self.operator_c,
+            &mut self.operator_d,
+        ] {
+            operator.initialize(num_channels, max_samples_per_channel);
+        }
 
         self.output_buffer = vec![vec![0.0; max_samples_per_channel]; num_channels];
     }
@@ -51,7 +60,7 @@ impl Voice for FmVoice {
         sample_rate: f32,
     ) {
         // update the ratio of the core A oscillator
-        self.operator_a.update_core_ratio(params.fm_params.ratio);
+        self.update_core_ratios(params);
         // Core A phase modulates Core B. Core A is the modulator and Core B is the carrier.
         // The EG output is then multiplied by the output of Core B.
 
@@ -60,48 +69,56 @@ impl Voice for FmVoice {
             .eg
             .render(&params.eg_params, num_samples_to_process, sample_rate);
 
-        self.operator_a
-            .render(num_samples_to_process, params, sample_rate, false);
+        self.operator_a.render(
+            num_samples_to_process,
+            params,
+            sample_rate,
+            false,
+            params.fm_params.op_a_index,
+        );
 
         // copy the output of operator a into the pm input of operator b
         self.operator_b.add_pm_source(&self.operator_a);
-        self.operator_b
-            .render(num_samples_to_process, params, sample_rate, false);
+        self.operator_b.render(
+            num_samples_to_process,
+            params,
+            sample_rate,
+            false,
+            params.fm_params.op_b_index,
+        );
+        self.operator_c.add_pm_source(&self.operator_b);
+        self.operator_c.render(
+            num_samples_to_process,
+            params,
+            sample_rate,
+            false,
+            params.fm_params.op_c_index,
+        );
+        self.operator_d.add_pm_source(&self.operator_c);
+        self.operator_d.render(
+            num_samples_to_process,
+            params,
+            sample_rate,
+            false,
+            params.fm_params.op_d_index,
+        );
         // multiply the output of operator b by the eg value
         for (channel, output) in self.output_buffer.iter_mut().enumerate() {
             for (sample_index, sample) in output.iter_mut().enumerate() {
-                *sample = self.operator_b.output_buffer[channel][sample_index] * eg_value;
+                *sample += self.operator_a.output_buffer[channel][sample_index]
+                    * params.fm_params.op_a_mix;
+                *sample += self.operator_b.output_buffer[channel][sample_index]
+                    * params.fm_params.op_b_mix;
+                *sample += self.operator_c.output_buffer[channel][sample_index]
+                    * params.fm_params.op_c_mix;
+                *sample += self.operator_d.output_buffer[channel][sample_index]
+                    * params.fm_params.op_d_mix;
+                *sample *= eg_value;
             }
         }
         // Check the stealPending flag to see if the voice is being stolen, and if so:
         if self.is_stealing && !self.eg.is_playing() {
-            // Call the voice’s note-off handler – this was never called because the event was stolen
-            // Copy the voiceStealMIDIEvent structure into the voiceMIDIEvent structure
-            // Call the note-on handler with the new MIDI event information, switching the pitch and velocity to the stolen note – the steal operation is complete”
-            self.is_stealing = false;
-            if let Some(midi_event) = &self.current_midi_event {
-                self.note_off(
-                    midi_event.voice_id,
-                    midi_event.channel,
-                    midi_event.note,
-                    params,
-                    sample_rate,
-                );
-            }
-            // Note: it is possible we received the `note_off` event for the `next_midi_event` during the steal
-            // operation and so there is nothing to be done here.
-            self.current_midi_event = self.next_midi_event.take();
-
-            if let Some(midi_event) = &self.current_midi_event {
-                self.note_on(
-                    midi_event.note,
-                    midi_event.velocity,
-                    midi_event.voice_id,
-                    midi_event.channel,
-                    params,
-                    sample_rate,
-                );
-            }
+            self.finish_voice_steal(params, sample_rate);
         }
     }
 
@@ -144,6 +161,10 @@ impl Voice for FmVoice {
                 .note_on(note, velocity, voice_id, channel, params, sample_rate);
             self.operator_b
                 .note_on(note, velocity, voice_id, channel, params, sample_rate);
+            self.operator_c
+                .note_on(note, velocity, voice_id, channel, params, sample_rate);
+            self.operator_d
+                .note_on(note, velocity, voice_id, channel, params, sample_rate);
             self.eg.note_on(&params.eg_params, sample_rate);
         }
     }
@@ -172,6 +193,8 @@ impl Voice for FmVoice {
                 self.eg.note_off(&params.eg_params, sample_rate);
                 self.operator_a.note_off(params, sample_rate);
                 self.operator_b.note_off(params, sample_rate);
+                self.operator_c.note_off(params, sample_rate);
+                self.operator_d.note_off(params, sample_rate);
                 self.current_midi_event = None;
             }
         }
@@ -191,6 +214,50 @@ impl Voice for FmVoice {
             for (sample_index, sample) in output[block_start..block_end].iter_mut().enumerate() {
                 *sample += self.output_buffer[channel][sample_index];
             }
+        }
+    }
+}
+
+impl FmVoice {
+    fn update_core_ratios(&mut self, params: &crate::voice_utils::Parameters) {
+        self.operator_a
+            .update_core_ratio(params.fm_params.op_a_ratio);
+        self.operator_b
+            .update_core_ratio(params.fm_params.op_b_ratio);
+        self.operator_c
+            .update_core_ratio(params.fm_params.op_c_ratio);
+        self.operator_d
+            .update_core_ratio(params.fm_params.op_d_ratio);
+    }
+    /// This should be called after the voice has been stolen and the steal operation is complete
+    fn finish_voice_steal(&mut self, params: &crate::voice_utils::Parameters, sample_rate: f32) {
+        // --- What needs to be done ---
+        // Call the voice’s note-off handler – this was never called because the event was stolen
+        // Copy the voiceStealMIDIEvent structure into the voiceMIDIEvent structure
+        // Call the note-on handler with the new MIDI event information, switching the pitch and velocity to the stolen note – the steal operation is complete”
+        self.is_stealing = false;
+        if let Some(midi_event) = &self.current_midi_event {
+            self.note_off(
+                midi_event.voice_id,
+                midi_event.channel,
+                midi_event.note,
+                params,
+                sample_rate,
+            );
+        }
+        // Note: it is possible we received the `note_off` event for the `next_midi_event` during the steal
+        // operation and so there is nothing to be done here.
+        self.current_midi_event = self.next_midi_event.take();
+
+        if let Some(midi_event) = &self.current_midi_event {
+            self.note_on(
+                midi_event.note,
+                midi_event.velocity,
+                midi_event.voice_id,
+                midi_event.channel,
+                params,
+                sample_rate,
+            );
         }
     }
 }
