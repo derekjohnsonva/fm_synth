@@ -22,4 +22,4 @@ fn main() {
 
 ## TODO:
 
-- Add FM operations
+- Change FM to have 4 oscilators

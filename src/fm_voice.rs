@@ -1,5 +1,5 @@
 use crate::{
-    fm_core::FmCore,
+    fm_operator::Operator,
     linear_eg::{EnvelopeGenerator, LinearEG},
     voice_utils::{MidiEvent, Voice},
 };
@@ -9,8 +9,8 @@ use crate::{
 /// Synthesizer Plugins in C++: 2nd Edition" by Will Pirkle.
 
 pub struct FmVoice {
-    core_a: FmCore,
-    core_b: FmCore,
+    operator_a: Operator,
+    operator_b: Operator,
     eg: LinearEG,
     // TODO: Add a filter
     _id: Option<i32>,
@@ -19,27 +19,29 @@ pub struct FmVoice {
     current_midi_event: Option<MidiEvent>,
     next_midi_event: Option<MidiEvent>,
     output_buffer: Vec<Vec<f32>>, // 2D output buffer for stereo
-    pm_buffer: Vec<f32>,
 }
 
 impl Voice for FmVoice {
     fn new() -> Self {
         Self {
-            core_a: FmCore::new(),
-            core_b: FmCore::new(),
+            operator_a: Operator::new(),
+            operator_b: Operator::new(),
             eg: LinearEG::new(),
             _id: None,
             is_stealing: false,
             current_midi_event: None,
             next_midi_event: None,
             output_buffer: vec![vec![0.0; 1]; 2],
-            pm_buffer: vec![0.0; 1],
         }
     }
 
     fn initialize(&mut self, num_channels: usize, max_samples_per_channel: usize) {
+        self.operator_a
+            .initialize(num_channels, max_samples_per_channel);
+        self.operator_b
+            .initialize(num_channels, max_samples_per_channel);
+
         self.output_buffer = vec![vec![0.0; max_samples_per_channel]; num_channels];
-        self.pm_buffer = vec![0.0; max_samples_per_channel];
     }
 
     fn render(
@@ -49,7 +51,7 @@ impl Voice for FmVoice {
         sample_rate: f32,
     ) {
         // update the ratio of the core A oscillator
-        self.core_a.ratio = params.fm_params.ratio;
+        self.operator_a.update_core_ratio(params.fm_params.ratio);
         // Core A phase modulates Core B. Core A is the modulator and Core B is the carrier.
         // The EG output is then multiplied by the output of Core B.
 
@@ -58,22 +60,17 @@ impl Voice for FmVoice {
             .eg
             .render(&params.eg_params, num_samples_to_process, sample_rate);
 
-        // add the output of core A to the phase modulation buffer
-        for sample_index in 0..num_samples_to_process {
-            let core_output = self.core_a.render(sample_rate);
-            self.pm_buffer[sample_index] = core_output;
-        }
-        // render core B
-        for sample_index in 0..num_samples_to_process {
-            // add the phase modulation to the phase of core B
-            self.core_b
-                .clock
-                .add_phase_offset(self.pm_buffer[sample_index] * params.fm_params.index, true);
-            let core_output = self.core_b.render(sample_rate);
-            self.core_b.clock.remove_phase_offset();
-            // Add the core B output to the output buffer
-            for chanel in &mut self.output_buffer {
-                chanel[sample_index] = core_output * eg_value;
+        self.operator_a
+            .render(num_samples_to_process, params, sample_rate, false);
+
+        // copy the output of operator a into the pm input of operator b
+        self.operator_b.add_pm_source(&self.operator_a);
+        self.operator_b
+            .render(num_samples_to_process, params, sample_rate, false);
+        // multiply the output of operator b by the eg value
+        for (channel, output) in self.output_buffer.iter_mut().enumerate() {
+            for (sample_index, sample) in output.iter_mut().enumerate() {
+                *sample = self.operator_b.output_buffer[channel][sample_index] * eg_value;
             }
         }
         // Check the stealPending flag to see if the voice is being stolen, and if so:
@@ -109,8 +106,8 @@ impl Voice for FmVoice {
     }
 
     fn reset(&mut self, params: &crate::voice_utils::Parameters) {
-        self.core_a.reset();
-        self.core_b.reset();
+        self.operator_a.reset(params);
+        self.operator_b.reset(params);
         self.eg.reset(&params.eg_params);
     }
 
@@ -143,10 +140,10 @@ impl Voice for FmVoice {
                 velocity,
             });
             // Core A is the modulator and Core B is the carrier. Thus, Apply the fm ratio to the core a note
-            self.core_a
-                .note_on(note, velocity, sample_rate, voice_id, channel);
-            self.core_b
-                .note_on(note, velocity, sample_rate, voice_id, channel);
+            self.operator_a
+                .note_on(note, velocity, voice_id, channel, params, sample_rate);
+            self.operator_b
+                .note_on(note, velocity, voice_id, channel, params, sample_rate);
             self.eg.note_on(&params.eg_params, sample_rate);
         }
     }
@@ -173,8 +170,8 @@ impl Voice for FmVoice {
                 || (midi_event.channel == channel && midi_event.note == note)
             {
                 self.eg.note_off(&params.eg_params, sample_rate);
-                self.core_a.note_off();
-                self.core_b.note_off();
+                self.operator_a.note_off(params, sample_rate);
+                self.operator_b.note_off(params, sample_rate);
                 self.current_midi_event = None;
             }
         }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 mod clock;
 mod consts;
 mod fm_core;
+mod fm_operator;
 mod fm_voice;
 mod linear_eg;
 mod sin_osc;
