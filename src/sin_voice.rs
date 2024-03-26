@@ -291,6 +291,9 @@ mod tests {
 
     #[test]
     fn test_note_on_and_off() {
+        const SAMPLE_RATE: f32 = 44100.0;
+        const RELEASE_TIME_MS: f32 = 10.0;
+        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * RELEASE_TIME_MS / 1000.0) as usize;
         let params: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
@@ -301,9 +304,6 @@ mod tests {
             },
             ..Default::default()
         };
-        const SAMPLE_RATE: f32 = 44100.0;
-        const RELEASE_TIME_MS: f32 = 10.0;
-        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLE_RATE * RELEASE_TIME_MS / 1000.0) as usize;
         let mut voice = SinVoice::new();
         let note = 60;
         voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
@@ -329,6 +329,9 @@ mod tests {
     // Write a test to assert that when we play a note on immediately after a note off, we enter the steal state
     #[rstest]
     fn test_note_on_after_note_off(mut voice: SinVoice) {
+        const SAMPLES_RATE: f32 = 1000.0;
+        const ATTACK_TIME_MS: f32 = 10.0;
+        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLES_RATE * ATTACK_TIME_MS / 1000.0) as usize;
         let params: Parameters = Parameters {
             eg_params: EGParameters {
                 attack_time_msec: 10.0,
@@ -339,9 +342,6 @@ mod tests {
             },
             ..Default::default()
         };
-        const SAMPLES_RATE: f32 = 1000.0;
-        const ATTACK_TIME_MS: f32 = 10.0;
-        const NUM_SAMPLES_TO_PROCESS: usize = (SAMPLES_RATE * ATTACK_TIME_MS / 1000.0) as usize;
         let note = 60;
         voice.initialize(2, NUM_SAMPLES_TO_PROCESS);
         voice.note_on(note, 0.5, Some(1), 0, &params, SAMPLES_RATE);

@@ -7,7 +7,6 @@ use crate::{
 /// This is an FM Synth voice that implements the Voice trait.
 /// It is modeled on section 16.8 in the book "Designing Software
 /// Synthesizer Plugins in C++: 2nd Edition" by Will Pirkle.
-
 pub struct FmVoice {
     operator_a: Operator,
     operator_b: Operator,

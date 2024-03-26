@@ -5,8 +5,6 @@ use crate::linear_eg::EnvelopeGenerator;
 use crate::linear_eg::{self};
 
 /// An operator is one of several oscillators in an FM voice.
-///
-
 pub struct Operator {
     // TODO: Should probably refactor to make the fields private
     pub core: FmCore,
@@ -67,22 +65,23 @@ impl Operator {
             }
         }
         // set the pm_input buffer to zero
-        for sample in self.pm_input.iter_mut() {
+        for sample in &mut self.pm_input {
             *sample = 0.0;
         }
     }
 
-    pub fn add_pm_source(&mut self, other_operator: &Operator) {
+    #[allow(clippy::cast_precision_loss)]
+    pub fn add_pm_source(&mut self, other_operator: &Self) {
         // ensure that the pm_input buffer is the same size as the other operator's output buffer
         if self.pm_input.len() != other_operator.output_buffer[0].len() {
             nih_error!(
                 "The pm_input buffer is not the same size as the other operator's output buffer"
-            )
+            );
         }
         // get the number of channels in the other operator
         let num_channels = other_operator.output_buffer.len();
         let channel_weight = 1.0 / num_channels as f32;
-        for channel in other_operator.output_buffer.iter() {
+        for channel in &other_operator.output_buffer {
             for (sample_index, sample) in channel.iter().enumerate() {
                 self.pm_input[sample_index] += sample * channel_weight;
             }

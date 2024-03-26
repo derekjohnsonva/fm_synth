@@ -84,6 +84,7 @@ impl Default for FmSynth {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 impl Default for FmSynthParams {
     fn default() -> Self {
         Self {

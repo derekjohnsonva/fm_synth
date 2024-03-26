@@ -2,6 +2,7 @@ use crate::linear_eg::EGParameters;
 #[derive(Default)]
 /// Ratio is the ratio of the carrier frequency to the modulator frequency.
 /// Index is the value that we multiply the output of the modulator by.
+#[allow(clippy::struct_field_names)]
 pub struct FmParams {
     pub op_a_ratio: f32,
     pub op_b_ratio: f32,
