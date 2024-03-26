@@ -23,7 +23,6 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 # nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default_features = false, features = ["assert_process_allocs"] }
-color-eyre = "0.6.2"
 rstest = "0.18.2"
 
 [dev-dependencies]
