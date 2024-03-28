@@ -64,10 +64,8 @@ impl Operator {
                 chanel[sample_index] = self.last_output;
             }
         }
-        // set the pm_input buffer to zero
-        for sample in &mut self.pm_input {
-            *sample = 0.0;
-        }
+        // Zero out the pm_input buffer using the fill method
+        self.pm_input.fill(0.0);
     }
 
     #[allow(clippy::cast_precision_loss)]
