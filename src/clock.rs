@@ -68,13 +68,7 @@ impl Clock {
     ///
     /// If the modulo counter is greater than 1 or less than 0, it is wrapped around to keep it within the range of 0 to 1.
     pub fn wrap_clock(&mut self) {
-        if self.mcounter > 1.0 && self.mcounter < 2.0 {
-            self.mcounter -= 1.0;
-        } else if self.mcounter < 0.0 && self.mcounter > -1.0 {
-            self.mcounter += 1.0;
-        } else {
-            self.mcounter = wrap_min_max(self.mcounter, 0.0, 1.0);
-        }
+        self.mcounter = wrap_min_max(self.mcounter, 0.0, 1.0);
     }
 
     /// Advances the clock by a given render interval and wraps it around if necessary.
