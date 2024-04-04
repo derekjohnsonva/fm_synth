@@ -22,4 +22,6 @@ fn main() {
 
 ## TODO:
 
-- Change FM to have 4 oscilators
+- Add a GUI
+- Polyphonic Modulation (Change params per-voice)
+- Preset Management
