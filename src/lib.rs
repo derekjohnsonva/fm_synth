@@ -1,5 +1,6 @@
 use nih_plug::prelude::*;
 
+use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
 use std::sync::Arc;
 
 mod clock;
@@ -31,6 +32,8 @@ struct FmSynthParams {
     /// these IDs remain constant, you can rename and reorder these fields as you wish. The
     /// parameters are exposed to the host in the same order they were defined. In this case, this
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
+    #[persist = "editor-state"]
+    editor_state: Arc<EguiState>,
     #[id = "gain"]
     pub gain: FloatParam,
     #[id = "attack_time"]
@@ -88,6 +91,7 @@ impl Default for FmSynth {
 impl Default for FmSynthParams {
     fn default() -> Self {
         Self {
+            editor_state: EguiState::from_size(300, 180),
             // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
             // to treat these kinds of parameters as if we were dealing with decibels. Storing this
             // as decibels is easier to work with, but requires a conversion for every sample.
@@ -285,6 +289,41 @@ impl Plugin for FmSynth {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let params = self.params.clone();
+        create_egui_editor(
+            self.params.editor_state.clone(),
+            (),
+            |_, _| {},
+            move |egui_ctx, setter, _state| {
+                egui::CentralPanel::default().show(egui_ctx, |ui| {
+                    ui.label("Gain");
+                    ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
+                    ui.label("Attack Time");
+                    ui.add(widgets::ParamSlider::for_param(&params.attack_time, setter));
+                    ui.label("Decay Time");
+                    ui.add(widgets::ParamSlider::for_param(&params.decay_time, setter));
+                    ui.label("Sustain Level");
+                    ui.add(widgets::ParamSlider::for_param(
+                        &params.sustain_level,
+                        setter,
+                    ));
+                    ui.label("Release Time");
+                    ui.add(widgets::ParamSlider::for_param(
+                        &params.release_time,
+                        setter,
+                    ));
+                    ui.label("Number of Voices");
+                    ui.add(widgets::ParamSlider::for_param(&params.num_voices, setter));
+                    ui.label("Operator A Index");
+                    ui.add(widgets::ParamSlider::for_param(
+                        &params.operator_a_index,
+                        setter,
+                    ));
+                });
+            },
+        )
     }
 
     fn initialize(
