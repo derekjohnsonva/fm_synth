@@ -1,9 +1,11 @@
 use nih_plug::prelude::*;
+use nih_plug_vizia::ViziaState;
 
 use std::sync::Arc;
 
 mod clock;
 mod consts;
+mod editor;
 mod fm_core;
 mod fm_operator;
 mod fm_voice;
@@ -12,7 +14,6 @@ mod sin_osc;
 mod sin_voice;
 mod voice_group;
 mod voice_utils;
-
 /// The maximum size of an audio block. We'll split up the audio in blocks and render smoothed
 /// values to buffers since these values may need to be reused for multiple voices.
 const MAX_BLOCK_SIZE: usize = 64;
@@ -27,10 +28,15 @@ pub struct FmSynth {
 
 #[derive(Params)]
 struct FmSynthParams {
+    /// The editor state, saved together with the parameter state so the custom scaling can be
+    /// restored.
+    #[persist = "editor-state"]
     /// The parameter's ID is used to identify the parameter in the wrapper plugin API. As long as
     /// these IDs remain constant, you can rename and reorder these fields as you wish. The
     /// parameters are exposed to the host in the same order they were defined. In this case, this
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
+    editor_state: Arc<ViziaState>,
+
     #[id = "gain"]
     pub gain: FloatParam,
     #[id = "attack_time"]
@@ -88,6 +94,8 @@ impl Default for FmSynth {
 impl Default for FmSynthParams {
     fn default() -> Self {
         Self {
+            editor_state: editor::default_state(),
+
             // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
             // to treat these kinds of parameters as if we were dealing with decibels. Storing this
             // as decibels is easier to work with, but requires a conversion for every sample.
@@ -285,6 +293,10 @@ impl Plugin for FmSynth {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(self.params.clone(), self.params.editor_state.clone())
     }
 
     fn initialize(
