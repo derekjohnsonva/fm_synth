@@ -4,13 +4,13 @@ use nih_plug::editor::Editor;
 use nih_plug_vizia::{
     create_vizia_editor,
     vizia::prelude::*,
-    widgets::{ParamSlider, ResizeHandle},
+    widgets::{GenericUi, ResizeHandle},
     ViziaState,
 };
 
 use crate::FmSynthParams;
 #[allow(clippy::expl_impl_clone_on_copy)]
-#[derive(Lens)]
+#[derive(Clone, Lens)]
 struct Data {
     params: Arc<FmSynthParams>,
 }
@@ -18,7 +18,7 @@ struct Data {
 impl Model for Data {}
 
 pub fn default_state() -> Arc<ViziaState> {
-    ViziaState::new(|| (200, 150))
+    ViziaState::new(|| (680, 530))
 }
 
 pub fn create(
@@ -47,8 +47,7 @@ pub fn create(
                     .height(Pixels(50.0))
                     .child_top(Stretch(1.0))
                     .child_bottom(Pixels(0.0));
-                Label::new(cx, "Gain");
-                ParamSlider::new(cx, Data::params, |params| &params.gain);
+                GenericUi::new(cx, Data::params);
             })
             .row_between(Pixels(0.0))
             .child_left(Stretch(1.0))
